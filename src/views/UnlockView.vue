@@ -36,40 +36,49 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
-import { useRouter, useRoute } from 'vue-router';
+import { ref } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 
-const PASSWORD = import.meta.env.VITE_UNLOCK_PASSWORD;
-const router = useRouter();
-const route = useRoute();
+// 后端API地址
+const API = 'https://api.520661.xyz/api/proxy/auth'  // 你的 Next.js 代理路径
 
-const password = ref('');
-const error = ref('');
-const loading = ref(false);
-
-function isValid() {
-  return password.value === PASSWORD;
-}
+const router = useRouter()
+const route = useRoute()
+const password = ref('')
+const error = ref('')
+const loading = ref(false)
 
 function handleUnlock() {
-  loading.value = true;
-  error.value = '';
-  setTimeout(() => {
-    if (isValid()) {
-      const oneWeek = 1000 * 60 * 60 * 24 * 7;
-      localStorage.setItem('unlocked_v2', 'yes');
-      localStorage.setItem('unlocked_exp', Date.now() + oneWeek);
-      // 强制跳转并刷新页面
-      const redirect = route.query.redirect || '/';
-      window.location.replace(redirect);  
-    } else {
-      error.value = '密码错误，请重试';
-      password.value = '';
-    }
-    loading.value = false;
-  }, 500);
+  error.value = ''
+  loading.value = true
+  fetch(API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: password.value })
+  })
+    .then(async r => {
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}))
+        throw new Error(data?.error || '解锁失败')
+      }
+      return r.json()
+    })
+    .then(data => {
+      // 存token到localStorage
+      localStorage.setItem('proxy_token', data.token)
+      localStorage.setItem('proxy_token_exp', Date.now() + data.expires * 1000)
+      // 跳转
+      const redirect = route.query.redirect || '/'
+      window.location.replace(redirect)
+    })
+    .catch(e => {
+      error.value = e.message || '密码错误，请重试'
+      password.value = ''
+    })
+    .finally(() => {
+      loading.value = false
+    })
 }
-
 </script>
 
 <style scoped>
@@ -176,3 +185,4 @@ function handleUnlock() {
 .fade-enter-active, .fade-leave-active { transition: opacity 0.33s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>
+
