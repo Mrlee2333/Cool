@@ -39,14 +39,23 @@
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 
-// 后端API地址
-const API = 'https://api.520661.xyz/api/proxy/auth'  // 你的 Next.js 代理路径
+const API = 'https://api.520661.xyz/api/proxy/auth' // 改成你的后端认证API
 
 const router = useRouter()
 const route = useRoute()
 const password = ref('')
 const error = ref('')
 const loading = ref(false)
+
+// 自动跳转: 已有token且未过期就直接进主页
+if (typeof window !== 'undefined') {
+  const exp = +localStorage.getItem('proxy_token_exp') || 0
+  if (localStorage.getItem('proxy_token') && Date.now() < exp) {
+    // 如果 token 未过期，自动跳转
+    const redirect = route?.query?.redirect || '/'
+    window.location.replace(redirect)
+  }
+}
 
 function handleUnlock() {
   error.value = ''
@@ -64,10 +73,9 @@ function handleUnlock() {
       return r.json()
     })
     .then(data => {
-      // 存token到localStorage
       localStorage.setItem('proxy_token', data.token)
-      localStorage.setItem('proxy_token_exp', Date.now() + data.expires * 1000)
-      // 跳转
+      localStorage.setItem('proxy_token_exp', Date.now() + (data.expires * 1000 || 604800000))
+      // 强制跳转并刷新页面
       const redirect = route.query.redirect || '/'
       window.location.replace(redirect)
     })
@@ -80,6 +88,7 @@ function handleUnlock() {
     })
 }
 </script>
+
 
 <style scoped>
 .unlock-huawei-bg {
@@ -185,4 +194,5 @@ function handleUnlock() {
 .fade-enter-active, .fade-leave-active { transition: opacity 0.33s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>
+
 
