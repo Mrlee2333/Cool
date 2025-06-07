@@ -39,7 +39,9 @@
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 
-const API = 'https://api.520661.xyz/api/proxy/auth' // 改成你的后端认证API
+const API = 'https://api.520661.xyz/api/proxy/auth'
+const MAX_ATTEMPT = 10
+const LOCK_MINUTES = 30
 
 const router = useRouter()
 const route = useRoute()
@@ -47,18 +49,37 @@ const password = ref('')
 const error = ref('')
 const loading = ref(false)
 
-// 自动跳转: 已有token且未过期就直接进主页
+// === 本地爆破防护 ===
+const lockKey = 'unlock_lock_until'
+const errKey = 'unlock_err_count'
+
+function now() { return Date.now() }
+function getLockUntil() { return +(localStorage.getItem(lockKey) || 0) }
+function getErrCount() { return +(localStorage.getItem(errKey) || 0) }
+function setErrCount(n) { localStorage.setItem(errKey, n) }
+function setLockUntil(ts) { localStorage.setItem(lockKey, ts) }
+
 if (typeof window !== 'undefined') {
   const exp = +localStorage.getItem('proxy_token_exp') || 0
-  if (localStorage.getItem('proxy_token') && Date.now() < exp) {
-    // 如果 token 未过期，自动跳转
+  if (localStorage.getItem('proxy_token') && now() < exp) {
     const redirect = route?.query?.redirect || '/'
     window.location.replace(redirect)
   }
 }
 
+// --- 前端禁止爆破 ---
+function tooManyFail() {
+  const until = getLockUntil()
+  if (now() < until) return true
+  return false
+}
+
 function handleUnlock() {
   error.value = ''
+  if (tooManyFail()) {
+    error.value = `密码输错过多，请${LOCK_MINUTES}分钟后重试`
+    return
+  }
   loading.value = true
   fetch(API, {
     method: 'POST',
@@ -68,19 +89,35 @@ function handleUnlock() {
     .then(async r => {
       if (!r.ok) {
         const data = await r.json().catch(() => ({}))
-        throw new Error(data?.error || '解锁失败')
+        // 401带剩余次数
+        if (data?.error && /还可尝试 (\d+) 次/.test(data.error)) {
+          let cur = getErrCount() + 1
+          setErrCount(cur)
+          if (cur >= MAX_ATTEMPT) {
+            setLockUntil(now() + LOCK_MINUTES * 60 * 1000)
+            setErrCount(0)
+            error.value = `密码输错次数过多，请${LOCK_MINUTES}分钟后再试`
+          } else {
+            error.value = data.error
+          }
+        } else if (data?.error) {
+          error.value = data.error
+        } else {
+          error.value = '解锁失败'
+        }
+        throw new Error(error.value)
       }
       return r.json()
     })
     .then(data => {
       localStorage.setItem('proxy_token', data.token)
-      localStorage.setItem('proxy_token_exp', Date.now() + (data.expires * 1000 || 604800000))
-      // 强制跳转并刷新页面
+      localStorage.setItem('proxy_token_exp', now() + (data.expires * 1000 || 604800000))
+      setErrCount(0)
+      setLockUntil(0)
       const redirect = route.query.redirect || '/'
       window.location.replace(redirect)
     })
     .catch(e => {
-      error.value = e.message || '密码错误，请重试'
       password.value = ''
     })
     .finally(() => {
