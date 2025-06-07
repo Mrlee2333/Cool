@@ -1,0 +1,222 @@
+/* src/assets/main.css */
+:root {
+  --my-primary-color: hsl(171, 100%, 41%);
+  --my-primary-color-rgb: 0, 209, 178; /* HSL(171, 100%, 41%) 对应的 RGB */
+  --my-secondary-color: hsl(280, 100%, 60%); /* 用于加载动画的对比色 */
+  --my-secondary-color-rgb: 153, 51, 255; /* HSL(280, 100%, 60%) 对应的 RGB */
+
+  --my-body-background-color: hsl(220, 15%, 7%); /* 更深邃的科技蓝黑背景 */
+  --my-body-background-color-rgb: 15, 18, 23; /* HSL(220, 15%, 7%) 对应的 RGB (近似值) */
+  --my-text-color: hsl(0, 0%, 90%);
+  --my-text-light-color: hsl(0, 0%, 70%);
+  --my-strong-color: hsl(0, 0%, 95%);
+
+  --my-glass-bg: rgba(30, 35, 45, 0.65); /* 毛玻璃背景色 (偏冷的暗色调) */
+  --my-glass-border-color: rgba(180, 180, 200, 0.15); /* 玻璃边框，略微可见 */
+  
+  --my-card-background-color: hsl(220, 15%, 12%);
+  --my-input-background-color: hsl(220, 15%, 18%);
+  --my-input-border-color: hsl(220, 15%, 30%);
+  --my-input-placeholder-color: hsl(0, 0%, 50%);
+
+  --my-hover-glow-color-rgb: var(--my-primary-color-rgb);
+
+  /* Bulma 变量覆盖 */
+  --bulma-primary: var(--my-primary-color);
+  --bulma-link: var(--my-primary-color);
+  --bulma-body-background-color: var(--my-body-background-color);
+  --bulma-text: var(--my-text-color);
+  --bulma-text-light: var(--my-text-light-color);
+  --bulma-strong-color: var(--my-strong-color);
+  --bulma-card-background-color: var(--my-card-background-color);
+  --bulma-box-background-color: var(--my-card-background-color);
+  --bulma-input-background-color: var(--my-input-background-color);
+  --bulma-input-border-color: var(--my-input-border-color);
+  --bulma-input-placeholder-color: var(--my-input-placeholder-color);
+  --bulma-input-color: var(--my-text-color);
+}
+
+body {
+  font-family: 'Roboto', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  background-color: var(--my-body-background-color);
+  color: var(--my-text-color);
+  line-height: 1.6;
+  padding-top: 3.25rem; /* For is-fixed-top navbar */
+}
+
+/* Navbar Link Styling Fix */
+.navbar-item, .navbar-link {
+  text-decoration: none !important;
+
+}
+
+
+
+/* Glass Card Effect */
+.is-glass-card {
+  background: var(--my-glass-bg);
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  border: 1px solid var(--my-glass-border-color);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+  border-radius: 12px;
+  padding: 1.5rem;
+  transition: box-shadow 0.3s ease, transform 0.3s ease;
+}
+.is-glass-card:hover {
+  box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 0 25px rgba(var(--my-hover-glow-color-rgb), 0.2);
+}
+
+/* Tech Loader */
+.tech-loader {
+  width: 60px;
+  height: 60px;
+  position: relative;
+  margin: 30px auto;
+}
+.tech-loader::before, .tech-loader::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  mix-blend-mode: screen; 
+  animation: techLoaderSpin 1.5s ease-in-out infinite;
+}
+.tech-loader::before {
+  border-top-color: var(--my-primary-color);
+  border-left-color: var(--my-primary-color);
+  animation-delay: 0s;
+  box-shadow: 0 0 15px var(--my-primary-color);
+}
+.tech-loader::after {
+  border-bottom-color: var(--my-secondary-color);
+  border-right-color: var(--my-secondary-color);
+  animation-delay: -0.5s;
+  /* Removed static transform: scale(0.8) as animation handles scaling */
+  box-shadow: 0 0 15px var(--my-secondary-color);
+}
+
+@keyframes techLoaderSpin {
+  0% {
+    transform: translate(-50%, -50%) rotate(0deg) scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: translate(-50%, -50%) rotate(180deg) scale(0.9);
+    opacity: 0.7;
+  }
+  100% {
+    transform: translate(-50%, -50%) rotate(360deg) scale(1);
+    opacity: 1;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: hsl(220, 15%, 10%);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--my-primary-color);
+  border-radius: 5px;
+  border: 2px solid hsl(220, 15%, 10%);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(171, 100%, 51%);
+}
+
+/* Buttons */
+.button {
+    transition: all 0.25s ease-out;
+    border-radius: 6px;
+    font-weight: 500;
+}
+.button.is-primary {
+    background-color: var(--my-primary-color);
+    border: 1px solid var(--my-primary-color);
+    box-shadow: 0 2px 8px rgba(var(--my-primary-color-rgb), 0.25), 
+                inset 0 1px 1px rgba(255,255,255,0.15);
+    color: hsl(var(--my-primary-h, 171), 20%, 10%);
+}
+.button.is-primary:hover {
+    background-color: hsl(var(--my-primary-h, 171), var(--my-primary-s, 100%), calc(var(--my-primary-l, 41%) + 5%));
+    box-shadow: 0 4px 15px rgba(var(--my-primary-color-rgb), 0.35),
+                inset 0 1px 2px rgba(255,255,255,0.2);
+    transform: translateY(-2px) scale(1.02);
+}
+.button.is-primary:active {
+    transform: translateY(0px) scale(0.98);
+    box-shadow: 0 1px 5px rgba(var(--my-primary-color-rgb), 0.2),
+                inset 0 1px 1px rgba(0,0,0,0.1);
+}
+.button.is-primary.is-light {
+    background-color: rgba(var(--my-primary-color-rgb), 0.15) !important;
+    color: var(--my-primary-color) !important;
+    border: 1px solid rgba(var(--my-primary-color-rgb), 0.3) !important;
+}
+.button.is-primary.is-light:hover {
+    background-color: rgba(var(--my-primary-color-rgb), 0.25) !important;
+    border-color: rgba(var(--my-primary-color-rgb), 0.5) !important;
+    color: var(--my-primary-color) !important;
+}
+
+.button.is-link.is-outlined {
+    border-color: var(--my-primary-color);
+    color: var(--my-primary-color);
+}
+.button.is-link.is-outlined:hover {
+    background-color: rgba(var(--my-primary-color-rgb), 0.1);
+    border-color: var(--my-primary-color);
+    color: var(--my-primary-color);
+}
+
+/* Utility Classes */
+.letter-spacing-1 {
+    letter-spacing: 1px;
+}
+
+/* Animation Classes */
+.animated-fadeIn {
+  animation: fadeIn 0.7s ease-out forwards;
+  opacity: 0;
+}
+.animated-fadeInUp {
+  animation: fadeInUp 0.5s ease-out forwards;
+  opacity: 0;
+}
+@keyframes fadeIn {
+  to { opacity: 1; }
+}
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.navbar-item.is-active,
+.navbar-item.router-link-exact-active {
+    background-color: transparent !important; /* 强制背景透明 */
+    color: var(--my-text-light-color) !important; /* 强制文字颜色为默认的浅灰色 */
+    border-bottom: none !important; /* 强制移除我们之前添加的下划线 */
+    text-decoration: none !important; /* 强制移除任何其他下划线 */
+    box-shadow: none !important; /* 移除任何可能的阴影效果 */
+}
+
+.navbar-item:hover,
+.navbar-item:focus {
+  background-color: rgba(var(--my-primary-color-rgb), 0.1) !important;
+  color: var(--my-primary-color) !important;
+  border-radius: 4px;
+}
+
