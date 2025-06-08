@@ -1,9 +1,9 @@
 <template>
   <div class="search-container mb-4 px-3">
-    <div class="field has-addons has-addons-centered">
+    <div class="field has-addons has-addons-centered search-bar-field">
       <div class="control is-expanded">
         <input
-          class="input is-medium is-rounded"
+          class="input is-medium is-rounded search-input"
           type="text"
           v-model="searchQuery"
           @keyup.enter="performSearch"
@@ -13,20 +13,24 @@
       </div>
       <div class="control">
         <button
-          class="button is-primary is-medium is-rounded"
+          class="button is-primary is-medium is-rounded search-btn"
           @click="performSearch"
           :disabled="isLoading"
           :class="{'is-loading': isLoading && !isCustomSourceSelected}"
         >
-          <span>{{ isLoading ? '搜索中...' : '搜索' }}</span>
+          <span v-if="!isLoading" class="icon search-btn-icon">
+            <i class="fas fa-search"></i>
+          </span>
+          <span v-if="isLoading" class="searching-text">搜索中...</span>
+          <span v-else class="search-text">搜索</span>
         </button>
       </div>
     </div>
 
-    <div class="field is-grouped is-grouped-centered mt-3">
-
+    <div class="field is-grouped is-grouped-centered mt-3 search-group-responsive">
       <div class="control">
-        <div class="select is-rounded is-small" :class="{'is-loading': isLoading && selectedSourceValue !== 'custom_manual_input' && !isCustomSourceSelected}">
+        <div class="select is-rounded is-small"
+             :class="{'is-loading': isLoading && selectedSourceValue !== 'custom_manual_input' && !isCustomSourceSelected}">
           <select v-model="selectedSourceValue" @change="handleSourceSelection" :disabled="isLoading">
             <option value="aggregated">聚合搜索</option>
             <option disabled>--- 配置源 ---</option>
@@ -55,13 +59,12 @@
       </div>
       <div class="control" v-if="selectedSourceValue === 'custom_manual_input'">
         <input
-          class="input is-rounded is-small"
+          class="input is-rounded is-small custom-api-input"
           type="text"
           v-model="manualCustomApiUrl"
           placeholder="自定义API基础URL"
           @keyup.enter="performSearch"
           :disabled="isLoading"
-          style="max-width: 250px;"
         />
       </div>
     </div>
@@ -73,13 +76,11 @@ import { ref, computed, watch } from 'vue';
 import { useCustomSourcesStore } from '@/store/customSourcesStore';
 import { useRouter } from 'vue-router';
 const props = defineProps({
-    isLoading: {
-        type: Boolean,
-        default: false
-    }
+  isLoading: {
+    type: Boolean,
+    default: false
+  }
 });
-
-//const emit = defineEmits(['search']);
 const router = useRouter();
 const customSourcesStore = useCustomSourcesStore();
 
@@ -87,17 +88,15 @@ const searchQuery = ref('');
 const selectedSourceValue = ref('aggregated');
 const manualCustomApiUrl = ref('');
 
-const isCustomSourceSelected = computed(() => {
-  return selectedSourceValue.value.startsWith('custom_') && selectedSourceValue.value !== 'custom_manual_input';
-});
+const isCustomSourceSelected = computed(() =>
+  selectedSourceValue.value.startsWith('custom_') &&
+  selectedSourceValue.value !== 'custom_manual_input'
+);
 
-const handleSourceSelection = () => {
-  // 可以在这里添加切换源后立即搜索的逻辑（如果需要）
-};
+const handleSourceSelection = () => {};
 
-// ** 3. 重写 performSearch 函数，使用 router.push **
 const performSearch = () => {
-  if (props.isLoading || !searchQuery.value.trim()) return; // 正在加载或搜索词为空则不执行
+  if (props.isLoading || !searchQuery.value.trim()) return;
 
   let sourceKeyForApi;
   let apiUrlForApi = '';
@@ -111,20 +110,18 @@ const performSearch = () => {
   } else {
     sourceKeyForApi = selectedSourceValue.value;
   }
-  
-  // 构建查询参数
+
   const queryParams = {
-      query: searchQuery.value.trim(),
-      source: sourceKeyForApi
+    query: searchQuery.value.trim(),
+    source: sourceKeyForApi
   };
   if (apiUrlForApi) {
-      queryParams.customApi = apiUrlForApi;
+    queryParams.customApi = apiUrlForApi;
   }
 
-  // 执行路由跳转
   router.push({
-      name: 'Search',
-      query: queryParams
+    name: 'Search',
+    query: queryParams
   });
 };
 
@@ -139,32 +136,148 @@ watch(() => customSourcesStore.sources, (newSourcesArray) => {
 </script>
 
 <style lang="scss" scoped>
-// 在 main.css 中定义的 .button.is-primary.is-loading::after 样式会处理加载动画
-// 你可以在这里添加 SearchBar 特有的其他样式
 .search-container {
-  // background-color: rgba(var(--my-body-background-color-rgb), 0.5); /* 轻微的背景，如果需要 */
-  // padding-bottom: 1rem; /* 调整与下方内容的间距 */
+  background: rgba(32,40,60,0.48);
+  border-radius: 16px;
+  box-shadow: 0 4px 32px rgba(25, 30, 48, 0.15);
+  backdrop-filter: blur(10px) saturate(130%);
+  -webkit-backdrop-filter: blur(10px) saturate(130%);
+  padding: 1.1rem 1.3rem 1rem 1.3rem;
+  margin-bottom: 1.7rem;
 }
 
-.label.has-text-light {
-    color: var(--my-text-light-color, #ccc); 
+// 优化 field 对齐方式，按钮与输入严格等高
+.search-bar-field {
+  align-items: stretch;
+  .control {
+    display: flex;
+    align-items: stretch;
+  }
 }
 
-.select select, .input {
-    // 如果需要进一步自定义输入框和下拉菜单的深色主题样式：
-    // background-color: var(--my-input-background-color, #2a2a2a);
-    // border-color: var(--my-input-border-color, #444);
-    // color: var(--my-text-color, #eee);
-    // &:focus {
-    //   border-color: var(--my-primary-color);
-    //   box-shadow: 0 0 0 0.125em rgba(var(--my-primary-color-rgb), 0.25);
-    // }
+.search-input,
+.search-btn {
+  height: 48px;
+  line-height: 48px;
+  font-size: 1.13em;
+  border-radius: 999px;
 }
-.select select option { // 下拉选项的样式（部分浏览器支持有限）
-    // background-color: var(--my-input-background-color, #2a2a2a);
-    // color: var(--my-text-color, #eee);
+
+.search-input {
+  padding: 0 1.1em;
+  background: rgba(38,45,61,0.88);
+  border: 1.5px solid var(--my-input-border-color, #335);
+  color: var(--my-text-color, #fff);
+  transition: border-color 0.18s;
+  &:focus {
+    border-color: var(--my-primary-color, #20e3b2);
+    box-shadow: 0 0 0 2px rgba(var(--my-primary-color-rgb, 0,209,178), 0.13);
+  }
+}
+
+.search-btn {
+  padding: 0 1.15em;
+  min-width: 48px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--my-primary-color, #11e6b2), #2499f6 80%);
+  color: #fff;
+  font-weight: 500;
+  box-shadow: 0 2px 8px rgba(50,200,180,0.07);
+  transition: background 0.22s, box-shadow 0.17s, transform 0.14s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  .search-btn-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.15em;
+    margin-right: 0.35em;
+  }
+  .searching-text,
+  .search-text {
+    display: flex;
+    align-items: center;
+    font-size: 1em;
+    margin-left: 0.12em;
+  }
+
+  &:hover, &:focus {
+    background: linear-gradient(90deg, #2499f6 10%, var(--my-primary-color, #11e6b2) 100%);
+    transform: scale(1.05);
+    box-shadow: 0 4px 20px rgba(0,240,190,0.14);
+  }
+  &:active {
+    transform: scale(0.96);
+  }
+}
+
+// 下拉和手动输入API美化，并排自适应不溢出
+.search-group-responsive {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.8em;
+  .control {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 270px;
+    display: flex;
+    align-items: center;
+  }
+}
+
+.custom-api-input {
+  width: 100%;
+  min-width: 0;
+  max-width: 230px;
+  box-sizing: border-box;
+}
+
+.select.is-rounded select,
+.input.is-rounded.is-small {
+  border-radius: 999px;
+  font-size: 0.98em;
+  background: rgba(34,36,42,0.88);
+  color: var(--my-text-color, #eee);
+  border: 1.2px solid var(--my-input-border-color, #335);
+}
+.select select option {
+  background: #282a31;
+  color: #ddd;
+}
+
+// 响应式
+@media (max-width: 600px) {
+  .search-container {
+    padding: 0.6rem 0.7rem 0.5rem 0.7rem;
+  }
+  .search-input, .search-btn {
+    height: 40px;
+    line-height: 40px;
+    font-size: 1em;
+  }
+  .search-btn {
+    min-width: 40px;
+    padding: 0 0.85em;
+  }
+  .search-group-responsive {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.4em;
+    .control {
+      max-width: 100%;
+    }
+  }
+  .custom-api-input {
+    max-width: 100%;
+  }
+}
+.search-group-responsive {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.8em;
 }
 </style>
-
-
-
