@@ -4,24 +4,35 @@
 
     <div v-if="error" class="notification is-danger is-light is-glass-card">{{ error }}</div>
 
-    <div class="columns is-multiline is-mobile">
-      <!-- 骨架动画 -->
-      <template v-if="isLoading">
-        <div v-for="n in 10" :key="`more-skel-${n}`" class="column is-half-mobile is-one-third-tablet is-one-quarter-desktop is-one-fifth-widescreen">
+    <transition name="fade" mode="out-in">
+      <div v-if="isLoading" key="skeletons" class="columns is-multiline is-mobile">
+        <div
+          v-for="n in 10"
+          :key="`more-skel-${n}`"
+          class="column is-half-mobile is-one-third-tablet is-one-quarter-desktop is-one-fifth-widescreen"
+          :style="{ animationDelay: (n*0.07)+'s' }"
+        >
           <SkeletonCard />
         </div>
-      </template>
-      <!-- 当前页数据 -->
-      <template v-else>
-        <div
-          v-for="(movie, index) in pageMovies"
-          :key="`more-movie-${index}`"
-          class="column is-half-mobile is-one-third-tablet is-one-quarter-desktop is-one-fifth-widescreen animated-fadeInUp"
-        >
-          <VideoCard :video="movie" @card-click="searchFromCard" />
-        </div>
-      </template>
-    </div>
+      </div>
+    </transition>
+
+    <!-- 数据卡片列表，TransitionGroup 错峰动画，不卡顿 -->
+    <TransitionGroup
+      name="fade"
+      tag="div"
+      class="columns is-multiline is-mobile"
+      v-if="!isLoading"
+    >
+      <div
+        v-for="(movie, index) in pageMovies"
+        :key="`more-movie-${index}`"
+        class="column is-half-mobile is-one-third-tablet is-one-quarter-desktop is-one-fifth-widescreen animated-fadeInUp"
+        :style="{ animationDelay: (index*0.04)+'s' }"
+      >
+        <VideoCard :video="movie" @card-click="searchFromCard" />
+      </div>
+    </TransitionGroup>
 
     <div class="has-text-centered mt-5">
       <button class="button is-light is-rounded mr-2"
@@ -34,16 +45,16 @@
         @click="goPage(currentPage+1)">
         下一页
       </button>
-       <div class="page-indicator" style="margin-top: 0.6em;">
-    <span class="is-size-7 has-text-grey">第 {{ currentPage }} / {{ maxPage }} 页</span>
-  </div>
+      <div class="page-indicator" style="margin-top: 0.6em;">
+        <span class="is-size-7 has-text-grey">第 {{ currentPage }} / {{ maxPage }} 页</span>
+      </div>
       <div v-if="rateLimitError" class="has-text-danger mt-2">{{ rateLimitError }}</div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/services/api'
 import VideoCard from '@/components/VideoCard.vue'
@@ -167,10 +178,27 @@ firstLoad()
 .more-douban-view .title {
   font-weight: 500;
 }
-
 .page-indicator {
   margin-top: 0.7em;
   font-size: 0.95em;
   letter-spacing: 0.07em;
+}
+/* 动画优化 */
+.animated-fadeInUp {
+  animation: fadeInUp 0.45s cubic-bezier(.41,.94,.59,1.08) both;
+  opacity: 0;
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(22px);}
+  to   { opacity: 1; transform: none;}
+}
+.fade-enter-active,
+.fade-leave-active,
+.fade-move {
+  transition: opacity 0.22s;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

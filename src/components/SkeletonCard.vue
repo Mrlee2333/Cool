@@ -8,42 +8,39 @@
   </div>
 </template>
 
-<style lang="scss" scoped>
-// SkeletonCard.vue 样式优化：丝滑 shimmer 流光骨架
+<script setup>
+// 空脚本，不需逻辑
+</script>
 
+<style lang="scss" scoped>
+// ----- Shimmer 流光动画 -----
+@keyframes skeleton-shimmer {
+  0%   { background-position: -150% 0; }
+  100% { background-position: 150% 0; }
+}
+
+// ---- 骨架卡片整体 ----
 .skeleton-card {
-  padding: 0; // 重置 is-glass-card 的 padding
+  padding: 0;
   border-color: transparent;
   border-radius: 12px;
   overflow: hidden;
-  background: none; // 透出毛玻璃
-
-  // 可选: 提高骨架卡片“浮动感”
   box-shadow: 0 2px 12px rgba(20, 40, 80, 0.08);
+  background: none;
 }
 
-// shimmer 动画
-@keyframes skeleton-shimmer {
-  0% {
-    background-position: -120% 0;
-  }
-  100% {
-    background-position: 120% 0;
-  }
-}
-
-// 用 shimmer 替换 pulse
+// ---- 骨架图片（2:3比例） ----
 .skeleton-image {
   border-top-left-radius: 12px;
   border-top-right-radius: 12px;
   width: 100%;
-  padding-top: 150%; /* 2:3 高宽比 */
+  padding-top: 150%; // 2:3
   background: linear-gradient(
     90deg,
-    #292b32 8%,
-    #343846 18%,
-    #43485a 33%,
-    #292b32 60%
+    #23242a 10%,
+    #383b47 20%,
+    #484b5a 35%,
+    #23242a 80%
   );
   background-size: 220% 100%;
   animation: skeleton-shimmer 1.3s cubic-bezier(.4,0,.2,1) infinite;
@@ -51,6 +48,7 @@
   overflow: hidden;
 }
 
+// ---- 骨架文本 ----
 .custom-card-content {
   padding: 0.75rem;
 }
@@ -58,19 +56,20 @@
 .skeleton-text {
   border-radius: 4px;
   height: 1em;
-  background: linear-gradient(
-    90deg,
-    #30333b 8%,
-    #44485a 18%,
-    #30333b 33%
-  );
-  background-size: 400% 100%;
-  animation: skeleton-shimmer 1.4s cubic-bezier(.4,0,.2,1) infinite;
   margin-bottom: 0.6rem;
   position: relative;
   overflow: hidden;
+  background: linear-gradient(
+    90deg,
+    #2c2f36 8%,
+    #43465a 18%,
+    #2c2f36 33%
+  );
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.4s cubic-bezier(.4,0,.2,1) infinite;
 }
 
+// ---- 标题、副标题尺寸 ----
 .skeleton-title {
   width: 85%;
   height: 1.2em;
@@ -82,4 +81,3 @@
   margin-bottom: 0;
 }
 </style>
-
