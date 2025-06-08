@@ -13,119 +13,85 @@
               :class="{ 'is-danger': error }"
               autocomplete="current-password"
               autofocus
+              :disabled="locked"
             />
             <span class="icon is-left"><i class="fas fa-key"></i></span>
           </div>
           <transition name="fade">
-            <p v-if="error" class="help is-danger unlock-err-tip">{{ error }}</p>
-          </transition>
+             <p v-if="locked" class="help is-danger unlock-err-tip">多次输错，已封禁，请稍后再试</p>
+            <p v-else-if="error" class="help is-danger unlock-err-tip">{{ error }}</p>
+</transition>
         </div>
         <button
           class="button unlock-btn is-large is-fullwidth mt-2"
           :class="{ 'is-loading': loading }"
+          :disabled="locked"
         >
           <span>解锁</span>
         </button>
       </form>
       <p class="unlock-tips">
         本站需授权访问。<br>
-        <span class="unlock-tip-sub">密码有效期一周</span>
+        <span class="unlock-tip-sub">密码有效期一周，输错 10 次后封禁 30 分钟</span>
       </p>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
+import axios from 'axios'
 import { useRouter, useRoute } from 'vue-router'
-
-const API = 'https://api.520661.xyz/api/proxy/auth'
-const MAX_ATTEMPT = 10
-const LOCK_MINUTES = 30
 
 const router = useRouter()
 const route = useRoute()
+
+const API_AUTH = import.meta.env.VITE_API_URL + '/api/proxy/auth'
+
 const password = ref('')
 const error = ref('')
 const loading = ref(false)
+const locked = ref(false)
 
-// === 本地爆破防护 ===
-const lockKey = 'unlock_lock_until'
-const errKey = 'unlock_err_count'
-
-function now() { return Date.now() }
-function getLockUntil() { return +(localStorage.getItem(lockKey) || 0) }
-function getErrCount() { return +(localStorage.getItem(errKey) || 0) }
-function setErrCount(n) { localStorage.setItem(errKey, n) }
-function setLockUntil(ts) { localStorage.setItem(lockKey, ts) }
-
-if (typeof window !== 'undefined') {
-  const exp = +localStorage.getItem('proxy_token_exp') || 0
-  if (localStorage.getItem('proxy_token') && now() < exp) {
-    const redirect = route?.query?.redirect || '/'
-    window.location.replace(redirect)
+// 自动跳转：已有且未过期的 token
+onMounted(() => {
+  const exp = Number(localStorage.getItem('proxy_token_exp') || '0')
+  const token = localStorage.getItem('proxy_token')
+  if (token && Date.now() < exp) {
+    const redirect = route.query.redirect || '/'
+    router.replace(redirect)
   }
-}
+})
 
-// --- 前端禁止爆破 ---
-function tooManyFail() {
-  const until = getLockUntil()
-  if (now() < until) return true
-  return false
-}
-
-function handleUnlock() {
+async function handleUnlock() {
   error.value = ''
-  if (tooManyFail()) {
-    error.value = `密码输错过多，请${LOCK_MINUTES}分钟后重试`
-    return
-  }
   loading.value = true
-  fetch(API, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password: password.value })
-  })
-    .then(async r => {
-      if (!r.ok) {
-        const data = await r.json().catch(() => ({}))
-        // 401带剩余次数
-        if (data?.error && /还可尝试 (\d+) 次/.test(data.error)) {
-          let cur = getErrCount() + 1
-          setErrCount(cur)
-          if (cur >= MAX_ATTEMPT) {
-            setLockUntil(now() + LOCK_MINUTES * 60 * 1000)
-            setErrCount(0)
-            error.value = `密码输错次数过多，请${LOCK_MINUTES}分钟后再试`
-          } else {
-            error.value = data.error
-          }
-        } else if (data?.error) {
-          error.value = data.error
-        } else {
-          error.value = '解锁失败'
-        }
-        throw new Error(error.value)
-      }
-      return r.json()
-    })
-    .then(data => {
-      localStorage.setItem('proxy_token', data.token)
-      localStorage.setItem('proxy_token_exp', now() + (data.expires * 1000 || 604800000))
-      setErrCount(0)
-      setLockUntil(0)
-      const redirect = route.query.redirect || '/'
-      window.location.replace(redirect)
-    })
-    .catch(e => {
-      password.value = ''
-    })
-    .finally(() => {
-      loading.value = false
-    })
+  locked.value = false
+  try {
+    const resp = await axios.post(API_AUTH, { password: password.value })
+    const { token, expires } = resp.data
+    localStorage.setItem('proxy_token', token)
+    localStorage.setItem('proxy_token_exp', Date.now() + expires * 1000)
+    const redirect = route.query.redirect || '/'
+    router.replace(redirect).then(() => {
+  window.location.reload()
+})
+  } catch (err) {
+    // 判断是否被封禁
+    if (err.response?.status === 429) {
+      locked.value = true
+      error.value = err.response.data.error || '尝试次数过多，请稍后再试'
+    } else if (err.response?.data?.error) {
+      error.value = err.response.data.error
+    } else {
+      error.value = '解锁失败，请重试'
+    }
+    password.value = ''
+  } finally {
+    loading.value = false
+  }
 }
 </script>
-
 
 <style scoped>
 .unlock-huawei-bg {
@@ -231,5 +197,6 @@ function handleUnlock() {
 .fade-enter-active, .fade-leave-active { transition: opacity 0.33s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>
+
 
 

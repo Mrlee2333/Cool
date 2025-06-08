@@ -219,4 +219,15 @@ body {
   color: var(--my-primary-color) !important;
   border-radius: 4px;
 }
-
+.custom-source-manager input,
+.custom-source-manager textarea {
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-x: auto;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.field-body, .field {
+  min-width: 0;
+}

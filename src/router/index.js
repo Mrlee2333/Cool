@@ -79,22 +79,20 @@ const router = createRouter({
   }
 });
 
-// 路由守卫：加密解锁逻辑
 router.beforeEach((to, from, next) => {
-  const unlocked = localStorage.getItem('unlocked_v2') === 'yes';
-  // 只允许访问 /unlock 或已经解锁的页面
-  if (!unlocked && to.name !== 'Unlock') {
-    next({
-      name: 'Unlock',
-      query: { redirect: to.fullPath }
-    });
-  } else if (unlocked && to.name === 'Unlock') {
-    // 已解锁再次访问解锁页，跳回首页或目标页
-    next({ path: to.query.redirect || '/' });
+  const token = localStorage.getItem('proxy_token')
+  const exp = Number(localStorage.getItem('proxy_token_exp') || '0')
+  const now = Date.now()
+  const isValid = token && now < exp
+
+  if (!isValid && to.name !== 'Unlock') {
+    next({ name: 'Unlock', query: { redirect: to.fullPath } })
+  } else if (isValid && to.name === 'Unlock') {
+    next({ path: to.query.redirect || '/' })
   } else {
-    next();
+    next()
   }
-});
+})
 
 export default router;
 

@@ -249,29 +249,4 @@ onMounted(fetchHomeData)
   margin-bottom: 0;
 }
 
-.custom-source-manager,
-.CustomSourceManager,
-.animated-fadeInUp {
-  max-width: 600px;
-  width: 100%;
-  margin: 0 auto 2rem auto;
-  overflow-x: auto;
-  box-sizing: border-box;
-}
-
-.custom-source-manager input,
-.custom-source-manager textarea {
-  max-width: 100%;
-  width: 100%;
-  box-sizing: border-box;
-  word-break: break-all;
-}
-
-@media (max-width: 600px) {
-  .custom-source-manager,
-  .CustomSourceManager {
-    max-width: 98vw;
-    padding: 0 4vw;
-  }
-}
 </style>

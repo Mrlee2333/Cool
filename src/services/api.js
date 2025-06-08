@@ -58,7 +58,8 @@ export default {
   async getDoubanHotJson(start = 0) {
     const doubanJsonUrl = `https://m.douban.com/rexxar/api/v2/subject/recent_hot/movie?start=${start}&limit=20&category=%E7%83%AD%E9%97%A8&type=%E5%85%A8%E9%83%A8`;
     const proxyUrl = import.meta.env.VITE_PROXY_URL;
-    const proxyKey = import.meta.env.VITE_PROXY_KEY;
+    const proxyKey = localStorage.getItem('proxy_token');
+    //const proxyKey = import.meta.env.VITE_PROXY_KEY;
     const proxyUA = import.meta.env.VITE_PROXY_UA;
     const proxyReferer = import.meta.env.VITE_PROXY_REFERER;
 

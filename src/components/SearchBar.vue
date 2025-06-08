@@ -24,7 +24,7 @@
     </div>
 
     <div class="field is-grouped is-grouped-centered mt-3">
-      <label class="label has-text-light mr-2 my-auto is-size-6">来源:</label>
+
       <div class="control">
         <div class="select is-rounded is-small" :class="{'is-loading': isLoading && selectedSourceValue !== 'custom_manual_input' && !isCustomSourceSelected}">
           <select v-model="selectedSourceValue" @change="handleSourceSelection" :disabled="isLoading">

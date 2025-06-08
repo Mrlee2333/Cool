@@ -37,40 +37,34 @@ main.container {
   flex: 1 0 auto;
 }
 
-// Glass Morphism + 华为风动态渐变 + 响应式
 .cool-footer.glass-footer {
+  // 只保留背景、圆角、毛玻璃等，不加定位
   width: 100vw;
-  margin-left: calc(-1 * (100vw - 100%) / 2); // 防止 container 居中导致两侧不贴边
-  background: linear-gradient(120deg,
-    rgba(57, 70, 120, 0.86) 0%,
-    rgba(62, 97, 140, 0.81) 60%,
-    rgba(45, 49, 80, 0.90) 100%);
+  margin-left: calc(-1 * (100vw - 100%) / 2);
+  background: linear-gradient(
+    120deg,
+    rgba(57, 70, 120, 0.48) 0%,
+    rgba(62, 97, 140, 0.42) 60%,
+    rgba(45, 49, 80, 0.55) 100%
+  );
   background-size: 200% 200%;
   animation: huawei-gradient-move 9s ease-in-out infinite;
-  box-shadow: 0 8px 32px 0 rgba(20,40,100,0.25);
+  box-shadow: 0 8px 32px 0 rgba(20,40,100,0.18);
   border-top-left-radius: 30px;
   border-top-right-radius: 30px;
-  backdrop-filter: blur(12px) saturate(120%);
-  -webkit-backdrop-filter: blur(12px) saturate(120%);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
   padding: 1.8rem 0.5rem 1.3rem 0.5rem;
   display: flex;
   justify-content: center;
   align-items: center;
   min-height: 78px;
+  border-top: 1px solid rgba(255,255,255,0.16);
+  position: static; // 确保不是 fixed
+  overflow: hidden;
 
-  @media (max-width: 600px) {
-    border-radius: 18px 18px 0 0;
-    min-height: 54px;
-    padding: 1rem 0.5rem 0.7rem 0.5rem;
-  }
+
 }
-
-@keyframes huawei-gradient-move {
-  0% { background-position: 0% 100%; }
-  50% { background-position: 100% 0%; }
-  100% { background-position: 0% 100%; }
-}
-
 // Footer内容排版和自定义颜色
 .footer-content {
   width: 100%;
