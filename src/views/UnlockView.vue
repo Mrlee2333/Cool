@@ -2,7 +2,7 @@
   <div class="unlock-huawei-bg">
     <div class="unlock-huawei-card">
       <h2 class="unlock-title">🔒 访问加密</h2>
-      <form @submit.prevent="handleUnlock">
+      <form @submit.prevent="handleUnlock" autocomplete="off">
         <div class="field">
           <div class="control has-icons-left">
             <input
@@ -11,21 +11,25 @@
               v-model="password"
               placeholder="请输入访问密码"
               :class="{ 'is-danger': error }"
-              autocomplete="current-password"
+              autocomplete="new-password"
               autofocus
               :disabled="locked"
+              maxlength="48"
+              @input="sanitizeInput"
+              @paste.prevent
             />
             <span class="icon is-left"><i class="fas fa-key"></i></span>
           </div>
           <transition name="fade">
-             <p v-if="locked" class="help is-danger unlock-err-tip">多次输错，已封禁，请稍后再试</p>
+            <p v-if="locked" class="help is-danger unlock-err-tip">多次输错，已封禁，请稍后再试</p>
             <p v-else-if="error" class="help is-danger unlock-err-tip">{{ error }}</p>
-</transition>
+          </transition>
         </div>
         <button
           class="button unlock-btn is-large is-fullwidth mt-2"
           :class="{ 'is-loading': loading }"
           :disabled="locked"
+          type="submit"
         >
           <span>解锁</span>
         </button>
@@ -45,7 +49,6 @@ import { useRouter, useRoute } from 'vue-router'
 
 const router = useRouter()
 const route = useRoute()
-
 const API_AUTH = import.meta.env.VITE_API_URL + '/api/proxy/auth'
 
 const password = ref('')
@@ -53,7 +56,11 @@ const error = ref('')
 const loading = ref(false)
 const locked = ref(false)
 
-// 自动跳转：已有且未过期的 token
+// 只允许安全字符，防止多字节爆破和特殊字符攻击
+const sanitizeInput = () => {
+  password.value = password.value.replace(/[<>"'`\\\s]/g, '').slice(0, 48)
+}
+
 onMounted(() => {
   const exp = Number(localStorage.getItem('proxy_token_exp') || '0')
   const token = localStorage.getItem('proxy_token')
@@ -67,6 +74,32 @@ async function handleUnlock() {
   error.value = ''
   loading.value = true
   locked.value = false
+
+  // 前端安全校验
+  if (!password.value) {
+    error.value = '密码不能为空'
+    loading.value = false
+    return
+  }
+  if (password.value.length < 4) {
+    error.value = '密码过短'
+    loading.value = false
+    return
+  }
+  // 阻止特殊符号和超长密码
+  if (/[<>"'`\\\s]/.test(password.value)) {
+    error.value = '密码不能含特殊字符'
+    loading.value = false
+    password.value = ''
+    return
+  }
+  if (password.value.length > 48) {
+    error.value = '密码过长'
+    loading.value = false
+    password.value = ''
+    return
+  }
+
   try {
     const resp = await axios.post(API_AUTH, { password: password.value })
     const { token, expires } = resp.data
@@ -74,15 +107,18 @@ async function handleUnlock() {
     localStorage.setItem('proxy_token_exp', Date.now() + expires * 1000)
     const redirect = route.query.redirect || '/'
     router.replace(redirect).then(() => {
-  window.location.reload()
-})
+      window.location.reload()
+    })
   } catch (err) {
-    // 判断是否被封禁
     if (err.response?.status === 429) {
       locked.value = true
       error.value = err.response.data.error || '尝试次数过多，请稍后再试'
     } else if (err.response?.data?.error) {
       error.value = err.response.data.error
+    } else if (err.code === 'ECONNABORTED') {
+      error.value = '网络超时，请检查网络'
+    } else if (err.message && err.message.includes('Network')) {
+      error.value = '无法连接服务器'
     } else {
       error.value = '解锁失败，请重试'
     }
@@ -197,6 +233,7 @@ async function handleUnlock() {
 .fade-enter-active, .fade-leave-active { transition: opacity 0.33s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>
+
 
 
 
