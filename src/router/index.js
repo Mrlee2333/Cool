@@ -8,6 +8,9 @@ import SearchView from '../views/SearchView.vue';
 import HistoryView from '../views/HistoryView.vue';
 import MoreDouban from '../views/MoreDoubanView.vue';
 import UnlockView from '../views/UnlockView.vue';
+import SpiderView from '../views/SpiderView.vue';
+import ResultView from '../views/ResultView.vue';
+import SpiderDetailView from '../views/SpiderDetailView.vue';
 
 const routes = [
   //  { path: '/test', name: 'SwiperTest', component: SwiperTest },
@@ -64,7 +67,29 @@ const routes = [
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: NotFoundView,
+  },
+  {
+    path: '/nice',
+    name: 'SpiderView',
+    component: SpiderView, 
+  },
+  {
+  path: '/result',
+  name: 'Result',
+  component: ResultView
+},
+  {
+  path: '/spider-detail/:data?',
+  name: 'SpiderDetail',
+  component: SpiderDetailView,
+  props: route => {
+    let d = {}
+    try {
+      d = JSON.parse(decodeURIComponent(route.params.data || '{}'))
+    } catch {}
+    return d
   }
+}
 ];
 
 const router = createRouter({

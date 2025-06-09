@@ -41,6 +41,10 @@ export default {
    * @param {string} customDetailScrapeUrl 额外的自定义解析页URL
    */
   getVideoDetails(id, source = 'heimuer', customApiBaseUrl = '', customDetailScrapeUrl = '') {
+    if (source === 'spider') {
+    // spider 源不应请求后端
+    return Promise.resolve({ data: {} });
+  }
     let params = { id, source };
     if (source === 'custom') {
       if (customDetailScrapeUrl) {

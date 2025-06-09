@@ -112,7 +112,7 @@ const router = useRouter();
 const videoId = ref(route.params.videoId);
 const source = ref(route.params.source);
 
-// 这里 videoTitle/cover 将根据 route.query 先兜底
+// 标题/封面优先从 query 获取（爬虫场景为 encodeURIComponent 传递）
 const videoTitle = ref(decodeURIComponent(route.query.title || '正在播放'));
 const cover = ref(route.query.cover ? decodeURIComponent(route.query.cover) : '');
 
@@ -198,6 +198,21 @@ const playerPageBackgroundStyle = computed(() => {
 const allSourcesQuery = computed(() => route.query.allSources ? { allSources: route.query.allSources } : {});
 
 const detailPageLink = computed(() => {
+    if (source.value === 'spider') {
+    const data = {
+      title: videoTitle.value,
+      cover: cover.value,
+      detailUrl: route.query.detailUrl || '', // 或者保存到 videoInfo 时带上
+      desc: route.query.desc || '',
+      m3u8Url: episodes.value[0]?.url || ''
+    }
+    return {
+      name: 'SpiderDetail',
+      params: {
+        data: encodeURIComponent(JSON.stringify(data)),
+      },
+    };
+  }
   const baseParams = { id: videoId.value };
   let queryParams = { ...allSourcesQuery.value };
   if (route.query.customApi) queryParams.customApi = route.query.customApi;
@@ -250,16 +265,13 @@ function parseEpisodeString(epData, index) {
   return { name: epData.name || `第 ${index + 1} 集`, url: epData.url || '' };
 }
 
-let lastSaveTime = 0; // 节流
+let lastSaveTime = 0;
 const handleTimeUpdate = ({ time, duration }) => {
   const now = Date.now();
   if (now - lastSaveTime < 5000) return;
   if (isLoading.value || !videoInfo.value || time < 1 || duration < 1) return;
-
-  // 保证标题和图片传递给历史管理器（播放记录）
   const saveTitle = videoInfo.value?.title || videoInfo.value?.vod_name || videoTitle.value || '未知';
   const saveCover = videoInfo.value?.cover || videoInfo.value?.vod_pic || cover.value || '';
-
   historyManager.updateProgress({
     videoId: videoId.value,
     source: source.value,
@@ -273,6 +285,7 @@ const handleTimeUpdate = ({ time, duration }) => {
 };
 
 async function fetchVideoDetailsAndEpisodes() {
+  if (source.value === 'spider') return;
   isLoading.value = true;
   error.value = null;
   try {
@@ -282,21 +295,16 @@ async function fetchVideoDetailsAndEpisodes() {
       episodes.value = (response.data.episodes || []).map((ep, index) => parseEpisodeString(ep, index)).filter(ep => ep.url);
       videoTitle.value = videoInfo.value?.title || videoInfo.value?.vod_name || videoTitle.value;
       cover.value = videoInfo.value?.cover || videoInfo.value?.vod_pic || cover.value;
-
-      // 同步playerOptions（修复切换剧集后player顶部标题/封面能实时变动）
       playerOptions.value = { ...playerOptions.value, title: videoTitle.value, poster: cover.value };
-
       const historyEntry = historyManager.getProgress(videoId.value, source.value);
       const initialIndexFromRoute = parseInt(route.params.episodeIndex, 10);
       let targetEpisodeIndex = 0;
-
       if (!isNaN(initialIndexFromRoute) && initialIndexFromRoute < episodes.value.length) {
         targetEpisodeIndex = initialIndexFromRoute;
       } else if (historyEntry && historyEntry.episodeIndex < episodes.value.length) {
         targetEpisodeIndex = historyEntry.episodeIndex;
       }
       currentEpisodeIndex.value = targetEpisodeIndex;
-
       currentEpisodeStartTime.value = (historyEntry && historyEntry.episodeIndex === currentEpisodeIndex.value) ? historyEntry.currentTime : 0;
     } else {
       throw new Error(response.data?.message || '加载视频信息失败。');
@@ -314,7 +322,6 @@ function selectEpisode(originalIndex) {
     playerError.value = null;
     const historyEntry = historyManager.getProgress(videoId.value, source.value);
     currentEpisodeStartTime.value = (historyEntry && historyEntry.episodeIndex === currentEpisodeIndex.value) ? historyEntry.currentTime : 0;
-
     let artPlayerDynamicTitle = videoInfo.value?.title || videoInfo.value?.vod_name || videoTitle.value || '视频';
     const newEpObj = episodes.value[originalIndex];
     if (newEpObj) {
@@ -343,24 +350,22 @@ const onPlayerReady = (artInstance) => {
     artRef.option.title = playerOptions.value.title;
   }
 
-  // 自动横屏（仅移动端有效）
+  // 只在全屏状态下安全调用 orientation.lock
   if (isMobile() && screen.orientation && typeof screen.orientation.lock === 'function') {
-    artInstance.on('fullscreen', (isFull) => {
-      if (isFull) {
-        try { screen.orientation.lock('landscape'); } catch (e) {}
-      } else {
-        try { screen.orientation.unlock(); } catch (e) {}
-      }
-    });
-    artInstance.on('fullscreenWeb', (isWebFull) => {
-      if (isWebFull) {
-        try { screen.orientation.lock('landscape'); } catch (e) {}
-      } else {
-        try { screen.orientation.unlock(); } catch (e) {}
-      }
-    });
+    const lockIfFullscreen = (isFull) => {
+      try {
+        if (isFull) {
+          if (document.fullscreenElement || document.webkitFullscreenElement) {
+            screen.orientation.lock('landscape').catch(() => {});
+          }
+        } else {
+          screen.orientation.unlock && screen.orientation.unlock();
+        }
+      } catch (e) { /* ignore */ }
+    };
+    artInstance.on('fullscreen', lockIfFullscreen);
+    artInstance.on('fullscreenWeb', lockIfFullscreen);
   }
-
   artInstance.on('fullscreen', (isFull) => { if (!isFull) setTimeout(() => artRef?.resize && artRef.resize(), 150); });
   artInstance.on('fullscreenWeb', (isWebFull) => { if (!isWebFull) setTimeout(() => artRef?.resize && artRef.resize(), 150); });
 };
@@ -389,7 +394,39 @@ const goBack = () => {
   router.push(detailPageLink.value);
 };
 
-onMounted(() => fetchVideoDetailsAndEpisodes());
+// ========= 独立支持spider源 =========
+
+function setSpiderInfo() {
+  // 完全还原原始直链
+  let url = videoId.value;
+  try {
+    url = decodeURIComponent(url);
+    if (url.includes('%2F') || url.includes('%3A')) {
+      url = decodeURIComponent(url);
+    }
+  } catch {}
+  episodes.value = [{ name: videoTitle.value, url }];
+  videoInfo.value = {
+    title: videoTitle.value,
+    cover: cover.value,
+  };
+  playerOptions.value = {
+    ...playerOptions.value,
+    title: videoTitle.value,
+    poster: cover.value,
+  };
+  isLoading.value = false;
+}
+
+// 只要 source 变成 spider，都走 setSpiderInfo
+onMounted(() => {
+  if (source.value === 'spider') {
+    setSpiderInfo();
+  } else {
+    fetchVideoDetailsAndEpisodes();
+  }
+});
+
 onUnmounted(() => {
   if (artRef && videoInfo.value) {
     const now = Date.now();
@@ -407,9 +444,14 @@ watch(() => route.params.episodeIndex, (newIndexStr) => {
   }
 }, { flush: 'post' });
 
-watch(() => [route.params.videoId, route.params.source], () => {
-  fetchVideoDetailsAndEpisodes();
-}, { deep: true });
+watch([() => route.params.videoId, () => route.params.source], ([newVideoId, newSource]) => {
+  if (newSource === 'spider') {
+    setSpiderInfo();
+  } else {
+    fetchVideoDetailsAndEpisodes();
+  }
+});
+
 
 </script>
 
@@ -580,6 +622,8 @@ watch(() => [route.params.videoId, route.params.source], () => {
   to { opacity: 1; }
 }
 </style>
+
+
 
 
 
