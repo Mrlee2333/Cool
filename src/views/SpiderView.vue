@@ -117,7 +117,6 @@
     </div>
   </div>
 </template>
-
 <script setup>
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
@@ -131,10 +130,11 @@ const movies = ref([])
 const nextUrl = ref('')
 const router = useRouter()
 const emptyTip = '为空，请检查XPath语法或网站不支持vercel代理'
+const pageNum = ref(1)
 
-// --------- 规则管理相关 ------------
 const LS_KEY = 'spider_rule_list_v2'
-const AES_KEY = 'SPIDER_RULE_SECRET' // 可更换为你的私钥
+const AES_KEY = 'SPIDER_RULE_SECRET' // 强烈建议放到.env
+
 const rules = reactive({
   list: '',
   title: '',
@@ -208,7 +208,6 @@ function rulesMatch(otherRules, otherUrl) {
   return Object.keys(rules).every(k => rules[k] === (otherRules[k] || '')) && url.value === (otherUrl || '')
 }
 loadAllRules()
-// -------------------------------------
 
 function fixUrl(href, baseUrl) {
   try {
@@ -217,6 +216,16 @@ function fixUrl(href, baseUrl) {
   } catch {
     return href
   }
+}
+
+function makePagedUrl(template, num) {
+  if (!template) return ''
+  return template.includes('${num}')
+    ? template.replace(/\$\{num\}/g, num)
+    : template
+}
+function isUsePagedTemplate(str) {
+  return str && str.includes('${num}')
 }
 
 async function fetchHtmlViaProxy(targetUrl) {
@@ -233,15 +242,21 @@ async function fetchHtmlViaProxy(targetUrl) {
   return await response.text()
 }
 
-async function fetchHtmlAndParse() {
+async function fetchHtmlAndParse(resetPage = true) {
   err.value = ''
   logList.value = []
   movies.value = []
   nextUrl.value = ''
   if (!url.value) { err.value = '请填写URL'; return }
+  if (resetPage) pageNum.value = 1
+
   loading.value = true
   try {
-    const html = await fetchHtmlViaProxy(url.value)
+    const currentUrl = isUsePagedTemplate(url.value)
+      ? makePagedUrl(url.value, pageNum.value)
+      : url.value
+
+    const html = await fetchHtmlViaProxy(currentUrl)
     const doc = new DOMParser().parseFromString(html, 'text/html')
     const listNodes = doc.evaluate(rules.list, doc, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null)
     const arr = []
@@ -253,11 +268,11 @@ async function fetchHtmlAndParse() {
       } catch {}
       try {
         cover = doc.evaluate(rules.cover, node, null, XPathResult.STRING_TYPE, null).stringValue.trim()
-        if (cover) cover = fixUrl(cover, url.value)
+        if (cover) cover = fixUrl(cover, currentUrl)
       } catch {}
       try {
         detailUrl = doc.evaluate(rules.detailUrl, node, null, XPathResult.STRING_TYPE, null).stringValue.trim()
-        if (detailUrl) detailUrl = fixUrl(detailUrl, url.value)
+        if (detailUrl) detailUrl = fixUrl(detailUrl, currentUrl)
       } catch {}
       arr.push({
         title: title || '',
@@ -267,14 +282,20 @@ async function fetchHtmlAndParse() {
     }
     let next = ''
     if (rules.nextUrl) {
-      try {
-        next = doc.evaluate(rules.nextUrl, doc, null, XPathResult.STRING_TYPE, null).stringValue.trim()
-        if (next) next = fixUrl(next, url.value)
-      } catch {}
+      if (isUsePagedTemplate(rules.nextUrl)) {
+        pageNum.value += 1
+        next = makePagedUrl(rules.nextUrl, pageNum.value)
+      } else {
+        try {
+          next = doc.evaluate(rules.nextUrl, doc, null, XPathResult.STRING_TYPE, null).stringValue.trim()
+          if (next) next = fixUrl(next, currentUrl)
+        } catch {}
+      }
     }
     movies.value = arr
     nextUrl.value = next
-    localStorage.setItem('spider_movies', JSON.stringify({ movies: arr, nextUrl: next }))
+    // 重要：把pageNum也一并存入localStorage，方便ResultView.vue读取
+    localStorage.setItem('spider_movies', JSON.stringify({ movies: arr, nextUrl: next, pageNum: pageNum.value, url: url.value, rules: { ...rules } }))
   } catch (e) {
     err.value = '采集失败: ' + e
   } finally {
@@ -292,11 +313,15 @@ const importText = ref('')
 const importMsg = ref('')
 
 function exportRules() {
-  const data = JSON.stringify(allRules.value)
-  const ciphertext = CryptoJS.AES.encrypt(data, AES_KEY).toString()
-  navigator.clipboard.writeText(ciphertext)
-    .then(() => { importMsg.value = '已复制加密规则到剪贴板！'; showImport.value = false })
-    .catch(() => { importMsg.value = '复制失败，请手动复制内容！' })
+  try {
+    const data = JSON.stringify(allRules.value)
+    const ciphertext = CryptoJS.AES.encrypt(data, AES_KEY).toString()
+    navigator.clipboard.writeText(ciphertext)
+      .then(() => { importMsg.value = '已复制加密规则到剪贴板！'; showImport.value = false })
+      .catch(() => { importMsg.value = '复制失败，请手动复制内容！' })
+  } catch (e) {
+    importMsg.value = '加密或复制失败: ' + e
+  }
 }
 
 function importRules() {
@@ -502,3 +527,4 @@ li a:hover { color: #fff; background: #162743; border-radius: 4px; }
   li span, li a { max-width: 75vw; font-size: 0.96em; }
 }
 </style>
+

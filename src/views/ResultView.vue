@@ -5,12 +5,9 @@
     <div v-if="error" class="notification is-danger is-light is-glass-card">{{ error }}</div>
 
     <transition name="fade" mode="out-in">
-      <div v-if="isLoading" key="skeletons" class="columns is-multiline is-mobile">
-        <div
-          v-for="n in PAGE_SIZE"
-          :key="`res-skel-${n}`"
-          class="column is-half-mobile is-one-third-tablet is-one-quarter-desktop is-one-fifth-widescreen"
-        >
+      <div v-if="isLoading && items.length === 0" key="skeletons" class="columns is-multiline is-mobile">
+        <div v-for="n in 12" :key="`res-skel-${n}`"
+          class="column is-half-mobile is-one-third-tablet is-one-quarter-desktop is-one-fifth-widescreen">
           <SkeletonCard />
         </div>
       </div>
@@ -20,10 +17,10 @@
       name="fade"
       tag="div"
       class="columns is-multiline is-mobile"
-      v-if="!isLoading"
+      v-if="!isLoading || items.length"
     >
       <div
-        v-for="(item, index) in pageItems"
+        v-for="(item, index) in items"
         :key="`res-item-${index}`"
         class="column is-half-mobile is-one-third-tablet is-one-quarter-desktop is-one-fifth-widescreen animated-fadeInUp"
       >
@@ -57,23 +54,13 @@
     </TransitionGroup>
 
     <div class="has-text-centered mt-5">
-      <button class="button is-light is-rounded mr-2"
-        :disabled="currentPage === 1 || isLoading"
-        @click="goPage(currentPage-1)">
-        上一页
-      </button>
-      <button class="button is-link is-rounded"
-        :disabled="currentPage === maxPage || isLoading"
-        @click="goPage(currentPage+1)">
-        下一页
-      </button>
-      <div class="page-indicator" style="margin-top: 0.6em;">
-        <span class="is-size-7 has-text-grey">第 {{ currentPage }} / {{ maxPage }} 页</span>
-      </div>
-      <div v-if="nextUrl" class="mt-3">
+      <div v-if="nextUrl">
         <button class="button is-info" :disabled="isLoadingNext" @click="loadNextPage">
           {{ isLoadingNext ? '加载中...' : '加载更多' }}
         </button>
+      </div>
+      <div v-else-if="!isLoading && items.length">
+        <span class="has-text-grey">已无更多数据</span>
       </div>
     </div>
   </div>
@@ -85,21 +72,18 @@ import { useRouter } from 'vue-router'
 import SkeletonCard from '@/components/SkeletonCard.vue'
 import { fetchAndParseMovies } from '@/utils/spiderHelper'
 
-const PAGE_SIZE = 10
 const resultCacheKey = 'spider_movies'
-const rulesCacheKey = 'spider_rules_v1'
 
 const isLoading = ref(true)
 const isLoadingNext = ref(false)
 const error = ref('')
 const items = ref([])
-const currentPage = ref(1)
-const maxPage = ref(1)
-const pageItems = ref([])
 const nextUrl = ref('')
 
 const router = useRouter()
+
 let rules = null
+
 const defaultCover = 'https://dummyimage.com/300x450/232942/93d0fe&text=NO+IMAGE'
 
 function onImgError(event) {
@@ -113,44 +97,23 @@ function loadData() {
   try {
     const cache = JSON.parse(localStorage.getItem(resultCacheKey) || '{}')
     if (Array.isArray(cache.movies)) {
-      items.value = cache.movies.map(m => ({
-        title: m.title,
-        cover: m.cover,
-        detailUrl: m.detailUrl,
-        desc: m.desc
-      }))
+      items.value = cache.movies
       nextUrl.value = cache.nextUrl || ''
-      maxPage.value = Math.max(1, Math.ceil(items.value.length / PAGE_SIZE))
-      setPage(1)
+      rules = cache.rules || {}
     } else {
       error.value = '没有采集到结果'
       items.value = []
-      maxPage.value = 1
-      pageItems.value = []
     }
-    rules = JSON.parse(localStorage.getItem(rulesCacheKey) || '{}')
   } catch (e) {
     error.value = '结果加载异常: ' + e
     items.value = []
-    maxPage.value = 1
-    pageItems.value = []
   }
   isLoading.value = false
 }
 
-function setPage(page) {
-  if (page < 1) page = 1
-  if (page > maxPage.value) page = maxPage.value
-  currentPage.value = page
-  pageItems.value = items.value.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-}
-
-function goPage(page) {
-  setPage(page)
-}
-
 function goDetail(item) {
   if (!item.detailUrl) return
+  // 传递所有 item 字段，兼容 SpiderDetailView.vue
   router.push({
     name: 'SpiderDetail',
     params: {
@@ -166,11 +129,14 @@ async function loadNextPage() {
   try {
     const { movies: newMovies, nextUrl: newNext } = await fetchAndParseMovies(nextUrl.value, rules)
     if (!newMovies.length) throw new Error('未获取到新数据')
-    items.value.push(...newMovies)
+    items.value = [...items.value, ...newMovies]
     nextUrl.value = newNext
-    maxPage.value = Math.max(1, Math.ceil(items.value.length / PAGE_SIZE))
-    setPage(maxPage.value)
-    localStorage.setItem(resultCacheKey, JSON.stringify({ movies: items.value, nextUrl: nextUrl.value }))
+    // 覆盖保存新结果
+    localStorage.setItem(resultCacheKey, JSON.stringify({
+      movies: items.value,
+      nextUrl: nextUrl.value,
+      rules
+    }))
   } catch (e) {
     error.value = '加载下一页失败: ' + e
   }
@@ -326,3 +292,4 @@ loadData()
   }
 }
 </style>
+
