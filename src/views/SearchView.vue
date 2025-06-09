@@ -19,7 +19,7 @@
           <span class="switch-text">芝麻开门</span>
         </label>
         <span v-if="enableBlockFilter && filteredCount>0" class="has-text-danger ml-2 filter-tip">
-           已打败{{ filteredCount }} 个怪兽
+           已打败{{ filteredCount }}个怪兽
         </span>
       </div>
     </div>
@@ -83,9 +83,9 @@ import CryptoJS from "crypto-js";
 const BLOCK_KEYWORDS = [
   '三级', '倫理', '伦理', '三級', '限制级', '情色', 'R级', 'r18', '无码', '無碼'
 ];
-const correctPassword = 'mrlee520'; // 关闭过滤的密码，请自行修改
-const AES_SECRET = 'block_switch_secret_2024'; // AES密钥，自定义
-const BLOCK_SWITCH_KEY = 'block_filter_switch_aes';
+const correctPassword = import.meta.env.VITE_BLOCK_FILTER_PASSWORD;
+const AES_SECRET = import.meta.env.VITE_BLOCK_FILTER_KEY;
+const BLOCK_SWITCH_KEY = import.meta.env.VITE_BLOCK_FILTER_OK;
 
 // 状态
 const enableBlockFilter = ref(getSwitchState());
