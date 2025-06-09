@@ -209,7 +209,7 @@ const fetchMainDetailAndEpisodes = async () => {
   try {
     const mainSource = allSources.value[0];
     const response = await api.getVideoDetails(
-      mainSource.vod_id,
+      decodeURIComponent(mainSource.vod_id),
       mainSource.source_code,
       mainSource.source_code === 'custom' ? mainSource.api_url : undefined,
       undefined
@@ -239,7 +239,7 @@ const fetchEpisodesForSource = async (idx) => {
   const curSource = allSources.value[idx];
   try {
     const response = await api.getVideoDetails(
-      curSource.vod_id,
+      decodeURIComponent(curSource.vod_id),
       curSource.source_code,
       curSource.source_code === 'custom' ? curSource.api_url : undefined,
       undefined
@@ -267,7 +267,7 @@ const navigateToPlayer = (originalIndex) => {
     name: 'Player',
     params: {
       source: curSource.source_code,
-      videoId: curSource.vod_id,
+      videoId: decodeURIComponent(curSource.vod_id),
       episodeIndex: originalIndex,
     },
     query: {

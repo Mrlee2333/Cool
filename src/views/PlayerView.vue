@@ -109,7 +109,7 @@ import { getHlsConfig } from '@/player.js';
 const route = useRoute();
 const router = useRouter();
 
-const videoId = ref(route.params.videoId);
+const videoId = ref(decodeURIComponent(route.params.videoId));
 const source = ref(route.params.source);
 
 // 标题/封面优先从 query 获取（爬虫场景为 encodeURIComponent 传递）

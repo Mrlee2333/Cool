@@ -60,7 +60,7 @@ const clickHandler = () => {
   if (props.video._sources && props.video._sources.length > 0) {
     router.push({
       name: 'Detail',
-      params: { id: props.video._sources[0].vod_id, source: props.video._sources[0].source_code },
+      params: { id: encodeURIComponent(props.video._sources[0].vod_id), source: props.video._sources[0].source_code },
       query: { allSources: encodeURIComponent(JSON.stringify(props.video._sources)) }
     })
     return
@@ -68,7 +68,7 @@ const clickHandler = () => {
   // 单源卡片
   if (props.video.source_code && props.video.vod_id) {
     const routeName = props.video.source_code === 'custom' ? 'CustomDetail' : 'Detail'
-    const params = { id: props.video.vod_id, source: props.video.source_code }
+    const params = { id: encodeURIComponent(props.video.vod_id), source: props.video.source_code }
     const query = props.video.source_code === 'custom' ? { customApi: props.video.api_url } : undefined
     router.push({ name: routeName, params, query })
   } else {
