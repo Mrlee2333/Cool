@@ -39,7 +39,8 @@
 	    <option value="hwba">华为吧资源</option>
             <option value="zuid">最大资源</option>
             <option value="ikun">iKun资源</option>
-            <template v-if="customSourcesStore.sources.length > 0">
+            <option value="360zy">360资源</option>
+	    <template v-if="customSourcesStore.sources.length > 0">
               <option disabled>--- 自定义源 (已保存) ---</option>
               <option
                 v-for="source in customSourcesStore.sources"
