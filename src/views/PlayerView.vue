@@ -129,7 +129,7 @@ const sortOrder = ref('asc');
 const showAllEpisodesInPlayer = ref(false);
 const maxInitialEpisodesInPlayer = 15;
 
-const adBlockerSettings = reactive({ enabled: true, debug: false });
+const adBlockerSettings = reactive({ enabled: true, debug: true });
 
 const playerOptions = ref({
   title: videoTitle.value,
