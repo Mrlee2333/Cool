@@ -23,19 +23,20 @@ const LL_HLS_SKIP_RE = /#EXT-X-SKIP:SKIPPED-SEGMENTS=(\d+)/;
  * AdAwareLoader - 一个能感知并过滤广告的 HLS 加载器
  */
 class AdAwareLoader extends Hls.DefaultConfig.loader {
-    constructor(config) {
-        super(config);
-        
-        // 从外部传入配置，而不是依赖全局变量
-        const customConfig = config.p2pConfig || {}; // artplayer 将配置放在 p2pConfig
-        this.adFilteringEnabled = customConfig.adFilteringEnabled !== false; // 默认开启
-        this.debugMode = customConfig.debugMode === true; // 默认关闭
-        
-        this.logPrefix = '[AdBlocker]';
-        if (this.debugMode) {
-            console.log(`${this.logPrefix} Initialized. Ad filtering is ${this.adFilteringEnabled ? 'ENABLED' : 'DISABLED'}.`);
-        }
+  static _alreadyInitLog = false;
+  constructor(config) {
+    super(config);
+    const customConfig = config.p2pConfig || {};
+    this.adFilteringEnabled = customConfig.adFilteringEnabled !== false;
+    this.debugMode = customConfig.debugMode === true;
+    this.logPrefix = '[AdBlocker]';
+    // 只在第一个 Loader 初始化时 log 一次
+    if (this.debugMode && !AdAwareLoader._alreadyInitLog) {
+      console.log(`${this.logPrefix} Initialized. Ad filtering is ${this.adFilteringEnabled ? 'ENABLED' : 'DISABLED'}.`);
+      AdAwareLoader._alreadyInitLog = true;
     }
+  }
+}
 
     /**
      * 核心的 M3U8 清理函数，整合了你提供的所有逻辑
