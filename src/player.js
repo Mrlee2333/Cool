@@ -36,7 +36,7 @@ class AdAwareLoader extends Hls.DefaultConfig.loader {
       AdAwareLoader._alreadyInitLog = true;
     }
   }
-}
+
 
     /**
      * 核心的 M3U8 清理函数，整合了你提供的所有逻辑
