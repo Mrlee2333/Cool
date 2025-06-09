@@ -36,14 +36,8 @@
             <option disabled>--- 配置源 ---</option>
             <option value="ruyi">如意资源</option>
             <option value="heimuer">黑木耳</option>
-            <option value="360zy">360资源</option>
 	    <option value="hwba">华为吧资源</option>
-            <option value="jisu">极速资源</option>
-            <option value="dbzy">豆瓣资源</option>
-            <option value="mozhua">魔爪资源</option>
-            <option value="mdzy">魔都资源</option>
             <option value="zuid">最大资源</option>
-            <option value="wujin">无尽资源</option>
             <option value="ikun">iKun资源</option>
             <template v-if="customSourcesStore.sources.length > 0">
               <option disabled>--- 自定义源 (已保存) ---</option>
