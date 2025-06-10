@@ -128,7 +128,7 @@ async function initializePlayer(strategy = 'proxy') {
           if (artInstance.hls) artInstance.hls.destroy();
           const hlsConfig = getHlsConfig({
             adFilteringEnabled: true,   // 始终开启去广告
-            debugMode: false
+            debugMode: true
           });
           const hls = new Hls(hlsConfig);
           hls.loadSource(url);
@@ -170,7 +170,6 @@ async function initializePlayer(strategy = 'proxy') {
     emit('ready', art);
     if (art.video) {
       art.video.addEventListener('timeupdate', onTimeupdateNative);
-      // 检测已开始播放（防止死等）
       art.video.addEventListener('playing', onPlaying);
     }
   });
@@ -213,14 +212,14 @@ async function initializePlayer(strategy = 'proxy') {
           emit('error', new Error('视频播放超时：代理不可用'));
         }
       }
-    }, 10000);
+    }, 5000);
   } else {
     // 直连8秒无playing，报错
     playTimeout = setTimeout(() => {
       if (!hasPlayed) {
         emit('error', new Error('视频播放超时：直连不可用'));
       }
-    }, 8000);
+    }, 6000);
   }
 }
 
