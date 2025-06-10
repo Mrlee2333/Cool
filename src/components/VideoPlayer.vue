@@ -6,20 +6,17 @@
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import Artplayer from 'artplayer';
 
-function isMobile() {
-  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-}
-
-// 自动提取 Referer
-function autoReferer(targetUrl) {
+// 自动提取 Referer（主域名）
+function getAutoReferer(url) {
   try {
-    const match = targetUrl.match(/\/proxy\/([^?]+)/);
+    // 如果是代理，自动解析 referer
+    const match = url.match(/\/proxy\/([^?]+)/);
     if (match && match[1]) {
       const decoded = decodeURIComponent(match[1]);
       const u = new URL(decoded);
       return u.origin + '/';
     } else {
-      const u = new URL(targetUrl);
+      const u = new URL(url);
       return u.origin + '/';
     }
   } catch {
@@ -27,15 +24,15 @@ function autoReferer(targetUrl) {
   }
 }
 
-// 构造代理url
+// 构造代理 url
 function buildProxyUrl(targetUrl) {
-  const proxyBase = import.meta.env.VITE_NETLIFY_PROXY_URL;
+  const proxyBase = import.meta.env.VITE_NETLIFY_PROXY_URL || import.meta.env.VITE_PROXY_URL;
   if (!proxyBase) return targetUrl;
   const urlObj = new URL(proxyBase);
   urlObj.searchParams.set('url', targetUrl);
   const ua = import.meta.env.VITE_PROXY_UA;
   if (ua) urlObj.searchParams.set('ua', ua);
-  urlObj.searchParams.set('referer', autoReferer(targetUrl));
+  urlObj.searchParams.set('referer', getAutoReferer(targetUrl));
   return urlObj.toString();
 }
 
@@ -44,20 +41,18 @@ const props = defineProps({
   episodeUrl: { type: String, required: true },
   startTime: { type: Number, default: 0 }
 });
-
 const emit = defineEmits(['timeupdate', 'ended', 'ready', 'error']);
 const artplayerRef = ref(null);
 let art = null;
 let hasSeeked = false;
 let orientationLocking = false;
 
-// 内部状态
+// 自动切换逻辑
 const playStrategy = ref('direct'); // direct | proxy
 let directFailCount = 0;
 let proxyFailCount = 0;
 let loadingEpisodeUrl = '';
 
-// 自动切换与重试逻辑
 async function tryPlayUrl(url, strategy, retryCount = 3) {
   return new Promise((resolve, reject) => {
     let errorCount = 0;
@@ -151,7 +146,6 @@ function initializePlayer() {
     if (playStrategy.value === 'direct') {
       directFailCount++;
       if (directFailCount < 3) {
-        // 直连再试
         try {
           await tryPlayUrl(loadingEpisodeUrl, 'direct');
           return;
@@ -185,8 +179,9 @@ function onTimeupdateNative() {
     emit('timeupdate', { time: art.currentTime, duration: art.duration });
   }
 }
-
-// 横屏锁定相关
+function isMobile() {
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+}
 async function lockOrientationLandscape() {
   if (orientationLocking) return;
   orientationLocking = true;
@@ -226,9 +221,7 @@ watch(
       directFailCount = 0;
       proxyFailCount = 0;
       if (art && art.url) {
-        art.switchUrl(newUrl).catch(() => {
-          // 如第一次失败，自动进入 error 自动重试机制
-        });
+        art.switchUrl(newUrl).catch(() => {});
       } else {
         nextTick(() => initializePlayer());
       }
@@ -247,9 +240,7 @@ watch(
 
 onMounted(() => { initializePlayer(); });
 onBeforeUnmount(() => {
-  if (art) {
-    art.destroy(false);
-  }
+  if (art) art.destroy(false);
   unlockOrientation();
 });
 </script>

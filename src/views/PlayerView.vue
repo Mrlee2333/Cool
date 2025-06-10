@@ -32,7 +32,7 @@
             :option="playerOptions"
             :episode-url="currentEpisodeData.url"
             :start-time="currentEpisodeStartTime"
-            @timeupdate="handleTimeUpdate"
+	    @timeupdate="handleTimeUpdate"
             @ended="handleEpisodeEnd"
             @ready="onPlayerReady"
             @error="onPlayerError"
