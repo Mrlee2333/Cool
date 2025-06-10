@@ -30,26 +30,14 @@ function isMobile() {
   return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 }
 
-// 自动提取 Referer
-function autoReferer(targetUrl) {
-  try {
-    const u = new URL(targetUrl);
-    return u.origin + '/';
-  } catch {
-    return '';
-  }
-}
-
-// 构造代理url
 function buildProxyUrl(targetUrl) {
   const proxyBase = import.meta.env.VITE_NETLIFY_PROXY_URL;
   if (!proxyBase) return targetUrl;
-  const urlObj = new URL(proxyBase);
-  urlObj.searchParams.set('url', targetUrl);
-  const ua = import.meta.env.VITE_PROXY_UA;
-  if (ua) urlObj.searchParams.set('ua', ua);
-  urlObj.searchParams.set('referer', autoReferer(targetUrl));
-  return urlObj.toString();
+
+  const encodedTarget = encodeURIComponent(targetUrl);
+  return proxyBase.endsWith('/')
+    ? proxyBase + encodedTarget
+    : proxyBase + '/' + encodedTarget;
 }
 
 function onTimeupdateNative() {
