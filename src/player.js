@@ -1,8 +1,7 @@
-import Hls from 'hls.js';
-
+// 广告相关的常量
 const AD_KEYWORDS = [
-  '/ads/', 'advertis', '//ad.', '.com/ad/', '.com/ads/', 'tracking', 
-  'doubleclick.net', 'googleads.g.doubleclick.net', 'googlesyndication.com', 
+  '/ads/', 'advertis', '//ad.', '.com/ad/', '.com/ads/', 'tracking',
+  'doubleclick.net', 'googleads.g.doubleclick.net', 'googlesyndication.com',
   'imasdk.googleapis.com', 'videoad', 'preroll', 'midroll', 'postroll', 'imasdk',
 ];
 const AD_REGEX_RULES = [
@@ -10,17 +9,35 @@ const AD_REGEX_RULES = [
   /^https?:\/\/[^\/]*?sponsor\.[^\/]+\//i,
   /\/advertisements\//i,
 ];
-const AD_TRIGGER_RE = /#EXT(?:-X)?-(?:CUE|SCTE35|DATERANGE).*?(?:CLASS="?ad"?|CUE-OUT|SCTE35-OUT|PLACEMENT-OPPORTUNITY|SCTE35-OUT-CONT)/i;
-const AD_END_RE = /#EXT(?:-X)?-(?:CUE|SCTE35|DATERANGE).*?(?:CUE-IN|SCTE35-IN|PLACEMENT-OPPORTUNITY-END)/i;
 const AD_FRAGMENT_URL_RE = /\/(?:ad|ads|adv|preroll|gg)[^\/]*\.ts([?#]|$)/i;
-const LL_HLS_PART_RE = /^#EXT-X-PART:.*URI="([^"]+)"/i;
-const LL_HLS_SKIP_RE = /#EXT-X-SKIP:SKIPPED-SEGMENTS=(\d+)/;
 
-let mainTsPrefix = '';
+let mainTsPrefix = '';  // 用于存储主 ts 片段前缀
 let adCount = 0;  // 用于统计广告片段数量
 
 function extractTsPrefix(url) {
   return url.replace(/[^/]+\.ts.*$/i, '');
+}
+
+function isLikelyAd(url, mainPrefix) {
+  let adScore = 0;
+
+  // 路径里广告关键词
+  for (const kw of AD_KEYWORDS) {
+    if (url.toLowerCase().includes(kw)) adScore++;
+  }
+
+  // 广告相关正则规则
+  for (const reg of AD_REGEX_RULES) {
+    if (reg.test(url)) adScore++;
+  }
+
+  // 明显广告文件名规则
+  if (AD_FRAGMENT_URL_RE.test(url)) adScore += 2;  // 明显广告片段
+
+  // 主片段前缀不同且带广告关键词
+  if (mainPrefix && !url.startsWith(mainPrefix) && adScore > 0) adScore++;
+
+  return adScore >= 2;  // 只有得分>=2时才认为是广告
 }
 
 class AdAwareLoader extends Hls.DefaultConfig.loader {
@@ -40,9 +57,7 @@ class AdAwareLoader extends Hls.DefaultConfig.loader {
   }
 
   _stripManifest(manifestText) {
-    if (!this.adFilteringEnabled) {
-      return manifestText;
-    }
+    if (!this.adFilteringEnabled) return manifestText;
 
     let inAdBreak = false;
     let skipCounter = 0;
@@ -67,7 +82,6 @@ class AdAwareLoader extends Hls.DefaultConfig.loader {
         break;
       }
     }
-
     if (localMainTsPrefix) mainTsPrefix = localMainTsPrefix;
 
     for (let i = 0; i < lines.length; i++) {
@@ -75,17 +89,16 @@ class AdAwareLoader extends Hls.DefaultConfig.loader {
       const trimmedLine = line.trim();
 
       if (!trimmedLine) continue;
+
       if (AD_TRIGGER_RE.test(trimmedLine)) {
         inAdBreak = true;
         filteredLines.push("#EXT-X-DISCONTINUITY");
         continue;
       }
-
       if (inAdBreak && AD_END_RE.test(trimmedLine)) {
         inAdBreak = false;
         continue;
       }
-
       if (inAdBreak) continue;
 
       const skipMatch = trimmedLine.match(LL_HLS_SKIP_RE);
@@ -101,43 +114,18 @@ class AdAwareLoader extends Hls.DefaultConfig.loader {
           continue;
         }
 
-        // 如果主片段前缀不匹配则丢弃
-        if (mainTsPrefix && !trimmedLine.startsWith(mainTsPrefix)) {
+        // 如果 ts URL 认为是广告
+        if (isLikelyAd(trimmedLine, mainTsPrefix)) {
           adCount++;
-          continue;
-        }
-
-        // 检查广告链接
-        let isAdUrl = false;
-        const lowerTrimmedLine = trimmedLine.toLowerCase();
-        for (const keyword of AD_KEYWORDS) {
-          if (lowerTrimmedLine.includes(keyword)) {
-            isAdUrl = true;
-            break;
-          }
-        }
-
-        if (!isAdUrl) {
-          for (const regex of AD_REGEX_RULES) {
-            if (regex.test(trimmedLine)) {
-              isAdUrl = true;
-              break;
-            }
-          }
-        }
-
-        if (isAdUrl) {
-          adCount++;
+          if (this.debugMode) console.log(`${this.logPrefix} Skipped potential ad segment:`, trimmedLine);
           continue;
         }
       }
-
       filteredLines.push(line);
     }
 
-    // 如果广告片段过滤成功，输出总数
     if (this.debugMode && adCount > 0) {
-      console.log(`${this.logPrefix} Total ${adCount} ads were skipped.`);
+      console.log(`${this.logPrefix} Total ${adCount} ad-like segments skipped.`);
     }
 
     return filteredLines.join("\n");
