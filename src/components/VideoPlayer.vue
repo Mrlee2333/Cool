@@ -6,7 +6,7 @@
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import Artplayer from 'artplayer';
 import Hls from 'hls.js';
-import { getHlsConfig } from '@/player.js'; // 去广告配置
+import { getHlsConfig, attachAdSkipLogic } from '@/player.js'; // 去广告配置
 
 const props = defineProps({
   option: { type: Object, required: true },
@@ -26,6 +26,9 @@ let triedProxy = false;
 let hasPlayed = false;
 let playTimeout = null;
 
+let lastSeekTime = -1;  // 用于记录上次seek的时间，避免重复seek
+
+// 判断设备是否为移动端
 function isMobile() {
   return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 }
@@ -111,26 +114,30 @@ async function initializePlayer(strategy = 'proxy') {
     fullscreen: true,
     flip: true,
     customType: {
-      m3u8: function playM3u8(video, url, artInstance) {
-        if (Hls.isSupported()) {
-          if (artInstance.hls) artInstance.hls.destroy();
-          const hlsConfig = getHlsConfig({
-            adFilteringEnabled: true,   // 始终开启去广告
-            debugMode: true
-          });
-          const hls = new Hls(hlsConfig);
-          hls.loadSource(url);
-          hls.attachMedia(video);
-          artInstance.hls = hls;
-          artInstance.on('destroy', () => { if (hls) hls.destroy() });
-        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-          video.src = url;
-          artInstance.notice.show('当前为原生HLS播放，无法过滤广告', 2500);
-        } else {
-          artInstance.notice.show('您的浏览器不支持播放此视频格式');
-        }
-      },
-    },
+  m3u8: function playM3u8(video, url, artInstance) {
+    if (Hls.isSupported()) {
+      if (artInstance.hls) artInstance.hls.destroy();
+      const hlsConfig = getHlsConfig({
+        adFilteringEnabled: true,
+        debugMode: true
+      });
+      const hls = new Hls(hlsConfig);
+      hls.loadSource(url);
+      hls.attachMedia(video);
+      artInstance.hls = hls;
+      artInstance.on('destroy', () => { if (hls) hls.destroy() });
+      // !!! 绑定自动跳广告逻辑
+      import('@/player.js').then(({ attachAdSkipLogic }) => {
+        attachAdSkipLogic(hls);
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = url;
+      artInstance.notice.show('当前为原生HLS播放，无法过滤广告', 2500);
+    } else {
+      artInstance.notice.show('您的浏览器不支持播放此视频格式');
+    }
+  }
+}
   };
 
   art = new Artplayer(playerOptions);
@@ -201,13 +208,27 @@ async function initializePlayer(strategy = 'proxy') {
         }
       }
     }, 5000);
-  } else {
-    // 直连8秒无playing，报错
+  } else {  // 直连8秒无playing，报错
     playTimeout = setTimeout(() => {
       if (!hasPlayed) {
         emit('error', new Error('视频播放超时：直连不可用'));
       }
     }, 6000);
+  }
+}
+
+// 防止卡死的广告跳过逻辑：seek 后手动调用startLoad恢复播放
+function seekToNextMainTs(currentUrl, hls) {
+  const playlist = hls.levels[hls.currentLevel]?.details?.fragments || [];
+  let nextIndex = playlist.findIndex(frag => frag.url === currentUrl);
+  while (nextIndex < playlist.length - 1) {
+    nextIndex++;
+    if (playlist[nextIndex].url.startsWith(mainTsPrefix)) {
+      hls.currentTime = playlist[nextIndex].start;
+      hls.startLoad();  // 强制恢复流加载
+      if (hls.config?.debugMode) console.log('[AdBlocker] Seek to next main ts:', playlist[nextIndex].url);
+      break;
+    }
   }
 }
 
@@ -255,3 +276,4 @@ onBeforeUnmount(() => {
   background-color: #000;
 }
 </style>
+
