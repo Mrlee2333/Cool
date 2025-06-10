@@ -84,7 +84,7 @@ const router = useRouter()
 
 let rules = null
 
-const defaultCover = 'https://dummyimage.com/300x450/232942/93d0fe&text=NO+IMAGE'
+const defaultCover = './assets/test.png'
 
 function onImgError(event) {
   event.target.src = defaultCover

@@ -30,12 +30,10 @@ function autoReferer(targetUrl) {
 
 // 构造代理url
 function buildProxyUrl(targetUrl) {
-  const proxyBase = import.meta.env.VITE_PROXY_URL;
+  const proxyBase = import.meta.env.VITE_NETLIFY_PROXY_URL;
   if (!proxyBase) return targetUrl;
   const urlObj = new URL(proxyBase);
   urlObj.searchParams.set('url', targetUrl);
-  const token = localStorage.getItem('proxy_token');
-  if (token) urlObj.searchParams.set('token', token);
   const ua = import.meta.env.VITE_PROXY_UA;
   if (ua) urlObj.searchParams.set('ua', ua);
   urlObj.searchParams.set('referer', autoReferer(targetUrl));
