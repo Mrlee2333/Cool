@@ -13,7 +13,6 @@ function isMobile() {
 // 自动提取 Referer
 function autoReferer(targetUrl) {
   try {
-    // /proxy/https%3A%2F%2Fabc.com%2F1.m3u8
     const match = targetUrl.match(/\/proxy\/([^?]+)/);
     if (match && match[1]) {
       const decoded = decodeURIComponent(match[1]);
@@ -57,7 +56,6 @@ const playStrategy = ref('direct'); // direct | proxy
 let directFailCount = 0;
 let proxyFailCount = 0;
 let loadingEpisodeUrl = '';
-let lastPlayUrl = '';
 
 // 自动切换与重试逻辑
 async function tryPlayUrl(url, strategy, retryCount = 3) {
@@ -101,7 +99,6 @@ function initializePlayer() {
   directFailCount = 0;
   proxyFailCount = 0;
   loadingEpisodeUrl = props.episodeUrl;
-  lastPlayUrl = props.episodeUrl;
 
   const playerOptions = {
     ...props.option,

@@ -8,6 +8,7 @@
         </transition>
       </router-view>
     </main>
+     <BackToTopRocket />
     <footer class="cool-footer glass-footer">
       <div class="footer-content">
         <p>
@@ -22,6 +23,7 @@
 
 <script setup>
 import Navbar from './components/Navbar.vue';
+import BackToTopRocket from './components/BackToTopRocket.vue';
 </script>
 
 <style lang="scss">

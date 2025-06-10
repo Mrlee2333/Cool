@@ -106,7 +106,6 @@
       </section>
     </div>
     <RecentHistoryFab />
-    <BackToTopRocket />
   </div>
 </template>
 
@@ -122,8 +121,6 @@ import CustomSourceManager from '@/components/CustomSourceManager.vue'
 import VideoCard from '@/components/VideoCard.vue'
 import SkeletonCard from '@/components/SkeletonCard.vue'
 import RecentHistoryFab from '@/components/RecentHistoryFab.vue'
-import BackToTopRocket from '@/components/BackToTopRocket.vue'
-
 const router = useRouter()
 const popularMovies = ref([])
 const isHomeLoading = ref(true)
