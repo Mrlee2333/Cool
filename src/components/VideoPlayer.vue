@@ -3,248 +3,215 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
-import Artplayer from 'artplayer';
+import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import Artplayer from 'artplayer'
+import Hls from 'hls.js'
 
-// 自动提取 Referer（主域名）
-function getAutoReferer(url) {
+// 自动提取 Referer
+function autoReferer(targetUrl) {
   try {
-    // 如果是代理，自动解析 referer
-    const match = url.match(/\/proxy\/([^?]+)/);
+    const match = targetUrl.match(/\/proxy\/([^?]+)/)
     if (match && match[1]) {
-      const decoded = decodeURIComponent(match[1]);
-      const u = new URL(decoded);
-      return u.origin + '/';
+      const decoded = decodeURIComponent(match[1])
+      const u = new URL(decoded)
+      return u.origin + '/'
     } else {
-      const u = new URL(url);
-      return u.origin + '/';
+      const u = new URL(targetUrl)
+      return u.origin + '/'
     }
   } catch {
-    return '';
+    return ''
   }
 }
-
-// 构造代理 url
+// 构造代理url
 function buildProxyUrl(targetUrl) {
-  const proxyBase = import.meta.env.VITE_NETLIFY_PROXY_URL || import.meta.env.VITE_PROXY_URL;
-  if (!proxyBase) return targetUrl;
-  const urlObj = new URL(proxyBase);
-  urlObj.searchParams.set('url', targetUrl);
-  const ua = import.meta.env.VITE_PROXY_UA;
-  if (ua) urlObj.searchParams.set('ua', ua);
-  urlObj.searchParams.set('referer', getAutoReferer(targetUrl));
-  return urlObj.toString();
+  const proxyBase = import.meta.env.VITE_NETLIFY_PROXY_URL
+  if (!proxyBase) return targetUrl
+  const urlObj = new URL(proxyBase)
+  urlObj.searchParams.set('url', targetUrl)
+  const ua = import.meta.env.VITE_PROXY_UA
+  if (ua) urlObj.searchParams.set('ua', ua)
+  urlObj.searchParams.set('referer', autoReferer(targetUrl))
+  return urlObj.toString()
 }
 
 const props = defineProps({
   option: { type: Object, required: true },
   episodeUrl: { type: String, required: true },
   startTime: { type: Number, default: 0 }
-});
-const emit = defineEmits(['timeupdate', 'ended', 'ready', 'error']);
-const artplayerRef = ref(null);
-let art = null;
-let hasSeeked = false;
-let orientationLocking = false;
+})
 
-// 自动切换逻辑
-const playStrategy = ref('direct'); // direct | proxy
-let directFailCount = 0;
-let proxyFailCount = 0;
-let loadingEpisodeUrl = '';
+const emit = defineEmits(['timeupdate', 'ended', 'ready', 'error'])
+const artplayerRef = ref(null)
+let art = null
+let hasSeeked = false
+let orientationLocking = false
 
-async function tryPlayUrl(url, strategy, retryCount = 3) {
-  return new Promise((resolve, reject) => {
-    let errorCount = 0;
-    let resolved = false;
-    const tryPlay = (currentTry) => {
-      if (resolved) return;
-      let realUrl = url;
-      if (strategy === 'proxy') {
-        realUrl = buildProxyUrl(url);
-      }
-      if (art) {
-        art.switchUrl(realUrl).then(() => {
-          resolved = true;
-          resolve(true);
-        }).catch((err) => {
-          errorCount++;
-          if (errorCount < retryCount) {
-            setTimeout(() => tryPlay(currentTry + 1), 600);
-          } else {
-            resolved = true;
-            reject(err || new Error('播放失败'));
-          }
-        });
-      } else {
-        resolved = true;
-        reject(new Error('ArtPlayer 未初始化'));
-      }
-    };
-    tryPlay(0);
-  });
-}
+// 状态
+let lastSourceUrl = ''
+let hasTriedProxy = false
 
 function initializePlayer() {
-  if (!artplayerRef.value || !props.episodeUrl) return;
-  if (art) art.destroy(false);
+  if (!artplayerRef.value || !props.episodeUrl) return
+  if (art) art.destroy(false)
+  hasSeeked = false
+  lastSourceUrl = props.episodeUrl
+  hasTriedProxy = false
 
-  hasSeeked = false;
-  playStrategy.value = 'direct';
-  directFailCount = 0;
-  proxyFailCount = 0;
-  loadingEpisodeUrl = props.episodeUrl;
-
-  const playerOptions = {
+  art = new Artplayer({
     ...props.option,
     title: props.option?.title || '',
     container: artplayerRef.value,
     url: props.episodeUrl,
-    autoMini: false,
-    playbackRate: true,
-    setting: true,
-    hotkey: true,
-    pip: true,
-    fullscreen: true,
-    flip: true,
-  };
-
-  art = new Artplayer(playerOptions);
+    customType: {
+      m3u8: (video, url, artInstance) => {
+        // 优先直连，失败自动切换代理
+        playM3u8WithAutoProxy(video, url, artInstance)
+      }
+    }
+  })
 
   art.on('fullscreen', (isFull) => {
     if (isMobile()) {
-      if (isFull) lockOrientationLandscape();
-      else unlockOrientation();
+      if (isFull) lockOrientationLandscape()
+      else unlockOrientation()
     }
-  });
+  })
 
   art.on('ready', () => {
     if (props.startTime && props.startTime > 0) {
       setTimeout(() => {
         if (art && !hasSeeked && Math.abs(art.currentTime - props.startTime) > 1) {
-          art.currentTime = props.startTime;
-          hasSeeked = true;
+          art.currentTime = props.startTime
+          hasSeeked = true
         }
-      }, 500);
+      }, 500)
     }
-    emit('ready', art);
+    emit('ready', art)
     if (art.video) {
-      art.video.addEventListener('timeupdate', onTimeupdateNative);
+      art.video.addEventListener('timeupdate', onTimeupdateNative)
     }
-  });
+  })
 
   art.on('destroy', () => {
     if (art && art.video) {
-      art.video.removeEventListener('timeupdate', onTimeupdateNative);
+      art.video.removeEventListener('timeupdate', onTimeupdateNative)
     }
-  });
+  })
 
-  art.on('video:ended', () => emit('ended'));
+  art.on('video:ended', () => emit('ended'))
+}
 
-  art.on('error', async (error) => {
-    // 自动重试直连三次
-    if (playStrategy.value === 'direct') {
-      directFailCount++;
-      if (directFailCount < 3) {
-        try {
-          await tryPlayUrl(loadingEpisodeUrl, 'direct');
-          return;
-        } catch {}
-      }
-      // 超过三次，切代理
-      playStrategy.value = 'proxy';
-      proxyFailCount = 0;
-      try {
-        await tryPlayUrl(loadingEpisodeUrl, 'proxy');
-        return;
-      } catch {}
+function playM3u8WithAutoProxy(video, url, artInstance) {
+  let hls = null
+  let useProxy = false
+  let failCount = 0
+
+  function loadHls(playUrl) {
+    if (hls) {
+      hls.destroy()
+      hls = null
     }
-    // 代理也重试三次
-    if (playStrategy.value === 'proxy') {
-      proxyFailCount++;
-      if (proxyFailCount < 3) {
-        try {
-          await tryPlayUrl(loadingEpisodeUrl, 'proxy');
-          return;
-        } catch {}
+    hls = new Hls({
+      // 你可以定制更多 HLS 配置
+      maxBufferLength: 60,
+      maxMaxBufferLength: 120
+    })
+    hls.attachMedia(video)
+    hls.loadSource(playUrl)
+
+    hls.on(Hls.Events.ERROR, function (event, data) {
+      if (data && data.fatal) {
+        failCount++
+        // 只要是致命错误都自动切换一次
+        if (!useProxy) {
+          useProxy = true
+          hls.destroy()
+          hls = null
+          setTimeout(() => loadHls(buildProxyUrl(url)), 180)
+        } else if (failCount < 3) {
+          // 代理失败也重试最多2次
+          hls.destroy()
+          hls = null
+          setTimeout(() => loadHls(buildProxyUrl(url)), 250)
+        } else {
+          if (hls) hls.destroy()
+          artInstance.notice.show('视频源加载失败（已尝试代理）', 3500)
+          emit('error', new Error('播放失败，直连和代理都无法访问此视频源。'))
+        }
       }
-    }
-    // 全部失败
-    emit('error', error || new Error('播放失败，直连和代理都无法访问此视频源。'));
-  });
+    })
+  }
+  loadHls(url)
 }
 
 function onTimeupdateNative() {
-  if (art) {
-    emit('timeupdate', { time: art.currentTime, duration: art.duration });
-  }
+  if (art) emit('timeupdate', { time: art.currentTime, duration: art.duration })
 }
+
+// ... 横屏相关逻辑略（和你现有一致）
+
+watch(
+  () => props.episodeUrl,
+  (newUrl, oldUrl) => {
+    if (newUrl && newUrl !== oldUrl) {
+      lastSourceUrl = newUrl
+      if (art && art.url) {
+        art.switchUrl(newUrl)
+      } else {
+        nextTick(() => initializePlayer())
+      }
+    }
+  }
+)
+
+watch(
+  () => props.option.title,
+  (newTitle) => {
+    if (art && art.option && art.option.title !== newTitle) {
+      art.option.title = newTitle
+    }
+  }
+)
+
+onMounted(() => { initializePlayer() })
+onBeforeUnmount(() => {
+  if (art) art.destroy(false)
+  unlockOrientation()
+})
+
 function isMobile() {
-  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
 }
 async function lockOrientationLandscape() {
-  if (orientationLocking) return;
-  orientationLocking = true;
+  if (orientationLocking) return
+  orientationLocking = true
   try {
     if (
       isMobile() &&
       screen.orientation &&
       typeof screen.orientation.lock === 'function'
     ) {
-      await screen.orientation.lock('landscape');
+      await screen.orientation.lock('landscape')
     }
   } catch (e) {}
-  orientationLocking = false;
+  orientationLocking = false
 }
 async function unlockOrientation() {
-  if (orientationLocking) return;
-  orientationLocking = true;
+  if (orientationLocking) return
+  orientationLocking = true
   try {
     if (
       isMobile() &&
       screen.orientation &&
       typeof screen.orientation.unlock === 'function'
     ) {
-      await screen.orientation.unlock();
+      await screen.orientation.unlock()
     }
   } catch (e) {}
-  orientationLocking = false;
+  orientationLocking = false
 }
-
-// 切集、切title监听
-watch(
-  () => props.episodeUrl,
-  (newUrl, oldUrl) => {
-    if (newUrl && newUrl !== oldUrl) {
-      loadingEpisodeUrl = newUrl;
-      playStrategy.value = 'direct';
-      directFailCount = 0;
-      proxyFailCount = 0;
-      if (art && art.url) {
-        art.switchUrl(newUrl).catch(() => {});
-      } else {
-        nextTick(() => initializePlayer());
-      }
-    }
-  }
-);
-
-watch(
-  () => props.option.title,
-  (newTitle) => {
-    if (art && art.option && art.option.title !== newTitle) {
-      art.option.title = newTitle;
-    }
-  }
-);
-
-onMounted(() => { initializePlayer(); });
-onBeforeUnmount(() => {
-  if (art) art.destroy(false);
-  unlockOrientation();
-});
 </script>
-
 <style scoped>
 .artplayer-container {
   width: 100%;
