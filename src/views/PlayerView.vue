@@ -131,6 +131,27 @@ const maxInitialEpisodesInPlayer = 15;
 
 const adBlockerSettings = reactive({ enabled: true, debug: true });
 
+function buildProxyUrl(targetUrl) {
+  const proxyBase = import.meta.env.VITE_NETLIFY_PROXY_URL;
+  if (!proxyBase) return targetUrl;
+  const urlObj = new URL(proxyBase);
+  urlObj.searchParams.set('url', targetUrl);
+  const ua = import.meta.env.VITE_PROXY_UA;
+  if (ua) urlObj.searchParams.set('ua', ua);
+  urlObj.searchParams.set('referer', autoReferer(targetUrl));
+  return urlObj.toString();
+}
+
+function autoReferer(targetUrl) {
+  try {
+    const u = new URL(targetUrl);
+    return u.origin + '/';
+  } catch {
+    return '';
+  }
+}
+
+
 const playerOptions = ref({
   title: videoTitle.value,
   poster: cover.value,
@@ -160,26 +181,66 @@ const playerOptions = ref({
   theme: '#23ade5',
   videoFit: 'contain',
   customType: {
-    m3u8: function playM3u8(video, url, art) {
-      if (Hls.isSupported()) {
-        if (art.hls) art.hls.destroy();
-        const hlsConfig = getHlsConfig({
-          adFilteringEnabled: adBlockerSettings.enabled,
-          debugMode: adBlockerSettings.debug
-        });
-        const hls = new Hls(hlsConfig);
-        hls.loadSource(url);
-        hls.attachMedia(video);
-        art.hls = hls;
-        art.on('destroy', () => { if (hls) hls.destroy() });
-      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = url;
-        art.notice.show('当前为原生HLS播放，无法过滤广告', 2500);
-      } else {
-        art.notice.show('您的浏览器不支持播放此视频格式');
+    m3u8: async function playM3u8(video, url, art) {
+      let directTried = 0;
+      let proxyTried = 0;
+      let played = false;
+
+      // 播放器重试/切换直连和代理
+      for (; directTried < 3 && !played; directTried++) {
+        try {
+          await playHls(url, false);
+          played = true;
+        } catch (e) {
+          // 可选打印日志
+          if (adBlockerSettings.debug) console.warn('[Player] Direct play failed:', e);
+        }
       }
-    },
-  },
+      if (!played) {
+        for (; proxyTried < 3 && !played; proxyTried++) {
+          try {
+            await playHls(buildProxyUrl(url), true);
+            played = true;
+          } catch (e) {
+            if (adBlockerSettings.debug) console.warn('[Player] Proxy play failed:', e);
+          }
+        }
+      }
+      if (!played) {
+        art.notice.show('视频播放失败：直连和代理都无法访问。', 3500);
+      }
+
+      // 单次播放方法
+      function playHls(playUrl, useProxy) {
+        return new Promise((resolve, reject) => {
+          if (Hls.isSupported()) {
+            if (art.hls) art.hls.destroy();
+            const hlsConfig = getHlsConfig({
+              adFilteringEnabled: adBlockerSettings.enabled,
+              debugMode: adBlockerSettings.debug,
+            });
+            const hls = new Hls(hlsConfig);
+            hls.loadSource(playUrl);
+            hls.attachMedia(video);
+            hls.on(Hls.Events.MANIFEST_PARSED, () => resolve());
+            hls.on(Hls.Events.ERROR, (event, data) => {
+              hls.destroy();
+              reject(data || event);
+            });
+            art.hls = hls;
+            art.on('destroy', () => { if (hls) hls.destroy(); });
+          } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = playUrl;
+            art.notice.show('当前为原生HLS播放，无法过滤广告', 2500);
+            resolve();
+          } else {
+            art.notice.show('您的浏览器不支持播放此视频格式');
+            reject();
+          }
+        });
+      }
+    }
+  }
 });
 
 const playerPageBackgroundStyle = computed(() => {
