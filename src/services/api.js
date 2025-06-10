@@ -17,19 +17,6 @@ apiClient.interceptors.request.use(config => {
   return config;
 }, error => Promise.reject(error));
 
-/**
- * 统一将视频直链（m3u8/mp4/直播流等）转换为Netlify代理URL
- * @param {string} url 原始直链
- * @returns {string} 代理直链
- */
-function toProxyUrl(url) {
-  const proxyBase = import.meta.env.VITE_NETLIFY_PROXY_URL;
-  if (!proxyBase || !url) return url;
-  if (/^https?:\/\/[^/]+\/proxy\//.test(url)) return url; // 已经是代理
-  // Netlify的proxy通常要求结尾带原始URL
-  return proxyBase.replace(/\/$/, '') + '/' + encodeURIComponent(url);
-}
-
 export default {
   /**
    * 聚合/主站/自定义源 搜索
@@ -96,7 +83,5 @@ export default {
     if (!json || !json.items) throw new Error('Douban response invalid or missing items!');
     return json;
   },
-
-  toProxyUrl,
 
 };

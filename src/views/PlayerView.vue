@@ -292,15 +292,7 @@ async function fetchVideoDetailsAndEpisodes() {
     const response = await api.getVideoDetails(videoId.value, source.value, route.query.customApi, route.query.customDetail);
     if (response.data?.code === 200) {
       videoInfo.value = response.data.videoInfo;
-      //episodes.value = (response.data.episodes || []).map((ep, index) => parseEpisodeString(ep, index)).filter(ep => ep.url);
-      episodes.value = (response.data.episodes || [])
-  .map((ep, index) => {
-    const parsed = parseEpisodeString(ep, index);
-    // 只要有直链就自动走代理
-    if (parsed.url) parsed.url = api.toProxyUrl(parsed.url);
-    return parsed;
-  })
-  .filter(ep => ep.url);
+      episodes.value = (response.data.episodes || []).map((ep, index) => parseEpisodeString(ep, index)).filter(ep => ep.url);
       videoTitle.value = videoInfo.value?.title || videoInfo.value?.vod_name || videoTitle.value;
       cover.value = videoInfo.value?.cover || videoInfo.value?.vod_pic || cover.value;
       playerOptions.value = { ...playerOptions.value, title: videoTitle.value, poster: cover.value };
@@ -412,7 +404,6 @@ function setSpiderInfo() {
       url = decodeURIComponent(url);
     }
   } catch {}
-  url = api.toProxyUrl(url);
   episodes.value = [{ name: videoTitle.value, url }];
   videoInfo.value = {
     title: videoTitle.value,
