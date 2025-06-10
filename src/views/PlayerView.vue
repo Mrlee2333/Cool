@@ -121,6 +121,35 @@ const sortOrder = ref('asc');
 const showAllEpisodesInPlayer = ref(false);
 const maxInitialEpisodesInPlayer = 15;
 
+const playerOptions = ref({
+  title: videoTitle.value,
+  poster: cover.value,
+  volume: 0.8,
+  isLive: false,
+  muted: false,
+  autoplay: true,
+  pip: true,
+  autoSize: false,
+  autoMini: true,
+  screenshot: true,
+  setting: true,
+  loop: false,
+  flip: false,
+  playbackRate: true,
+  aspectRatio: false,
+  fullscreen: true,
+  fullscreenWeb: true,
+  subtitleOffset: false,
+  miniProgressBar: true,
+  mutex: true,
+  backdrop: true,
+  playsInline: true,
+  autoPlayback: false,
+  airplay: true,
+  hotkey: true,
+  theme: '#23ade5',
+  videoFit: 'contain',
+  });
 
 const playerPageBackgroundStyle = computed(() => {
   if (videoInfo.value?.cover) {
