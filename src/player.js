@@ -19,223 +19,121 @@ const VOTING_HOSTS = [
 ];
 
 let weightedAdSet = new Set();
-let useWeightedFallback = false;
-let checkedSample = false;
-
-let votingActive = false;
-let mainDirStat = {};
-let mainSecondDir = '';
 let adTsSet = new Set();
+let votingActive = false;
 
-let skipHistorySet = new Set();
-let skipLoopLimit = 10;
-
-function isVotingHost(manifestUrl) {
-  return VOTING_HOSTS.some(host => manifestUrl.includes(host));
+function isVotingHost(url) {
+  return VOTING_HOSTS.some(h => url.includes(h));
 }
 
 function getSecondDir(url) {
   const u = url.split('?')[0].split('#')[0];
-  const match = u.match(/^https?:\/\/[^/]+(\/[^/]+\/[^/]+)\//);
-  return match ? match[1] : '';
+  const m = u.match(/^https?:\/\/[^/]+(\/[^/]+\/[^/]+)\//);
+  return m ? m[1] : '';
 }
 
 function isLikelyAd(url) {
-  let adScore = 0;
-  const lowerUrl = url.toLowerCase();
-  for (const keyword of AD_KEYWORDS) {
-    if (lowerUrl.includes(keyword)) adScore++;
-  }
-  for (const reg of AD_REGEX_RULES) {
-    if (reg.test(url)) adScore++;
-  }
-  if (AD_FRAGMENT_URL_RE.test(url)) adScore += 2;
-  return adScore >= 2;
+  let score = 0, lower = url.toLowerCase();
+  AD_KEYWORDS.forEach(k => lower.includes(k) && score++);
+  AD_REGEX_RULES.forEach(r => r.test(url) && score++);
+  if (AD_FRAGMENT_URL_RE.test(url)) score += 2;
+  return score >= 2;
 }
 
-function buildWeightedAdSet(manifestText) {
+function buildWeightedAdSet(manifest) {
   weightedAdSet.clear();
-  const tsLines = manifestText.split(/\r?\n/).filter(line => line.trim().endsWith('.ts'));
-  for (const tsUrl of tsLines) {
-    if (isLikelyAd(tsUrl)) weightedAdSet.add(tsUrl);
-  }
+  manifest.split(/\r?\n/).forEach(line => {
+    if (line.trim().endsWith('.ts') && isLikelyAd(line.trim())) {
+      weightedAdSet.add(line.trim());
+    }
+  });
 }
 
-function statTsDirAndAdSet(manifestText, manifestUrl) {
-  mainDirStat = {};
+function statVotingSet(manifest) {
+  const dirs = {}, lines = manifest.split(/\r?\n/).filter(l => l.trim().endsWith('.ts'));
   adTsSet.clear();
-  mainSecondDir = '';
-  checkedSample = true;
-  const tsLines = manifestText.split(/\r?\n/).filter(line => line.trim().endsWith('.ts'));
-  if (tsLines.length < 1) return;
-  for (const tsUrl of tsLines) {
-    const dir = getSecondDir(tsUrl);
-    if (!dir) continue;
-    mainDirStat[dir] = (mainDirStat[dir] || 0) + 1;
-  }
-  let max = 0;
-  for (const dir in mainDirStat) {
-    if (mainDirStat[dir] > max) {
-      max = mainDirStat[dir];
-      mainSecondDir = dir;
-    }
-  }
-  for (const tsUrl of tsLines) {
-    if (getSecondDir(tsUrl) !== mainSecondDir) {
-      adTsSet.add(tsUrl);
-    }
-  }
+  lines.forEach(url => {
+    const d = getSecondDir(url);
+    if (d) dirs[d] = (dirs[d] || 0) + 1;
+  });
+  let maxCount = 0, mainDir = '';
+  Object.entries(dirs).forEach(([d,c]) => { if (c > maxCount) { maxCount = c; mainDir = d; } });
+  lines.forEach(url => { if (getSecondDir(url) !== mainDir) adTsSet.add(url); });
 }
 
-function handleManifestSampling(manifestText, manifestUrl) {
-  checkedSample = true;
+function handleManifest(manifestText, manifestUrl) {
   votingActive = isVotingHost(manifestUrl);
   if (votingActive) {
-    statTsDirAndAdSet(manifestText, manifestUrl);
-    useWeightedFallback = false;
+    statVotingSet(manifestText);
   } else {
     buildWeightedAdSet(manifestText);
-    useWeightedFallback = true;
-  }
-}
-
-function skipIfAd(currentUrl, hls) {
-  if (skipHistorySet.has(currentUrl)) {
-    if (skipHistorySet.size > skipLoopLimit) {
-      if (hls.config?.debugMode) console.error('[AdBlocker] 循环跳播，停止。');
-      return;
-    }
-  }
-  skipHistorySet.add(currentUrl);
-
-  if (votingActive && adTsSet.size && adTsSet.has(currentUrl)) {
-    seekToNextNormalTs(currentUrl, hls);
-    return;
-  }
-  if (useWeightedFallback && weightedAdSet.has(currentUrl)) {
-    seekToNextNonAd(currentUrl, hls);
-    return;
-  }
-  skipHistorySet.clear();
-}
-
-function seekToNextNormalTs(currentUrl, hls) {
-  const playlist = hls.levels[hls.currentLevel]?.details?.fragments || [];
-  let nextIndex = playlist.findIndex(frag => frag.url === currentUrl);
-  let count = 0;
-  while (nextIndex < playlist.length - 1 && count < skipLoopLimit) {
-    nextIndex++; count++;
-    if (!adTsSet.has(playlist[nextIndex].url)) {
-      hls.currentTime = playlist[nextIndex].start;
-      hls.startLoad?.();
-      break;
-    }
-  }
-}
-
-function seekToNextNonAd(currentUrl, hls) {
-  const playlist = hls.levels[hls.currentLevel]?.details?.fragments || [];
-  let nextIndex = playlist.findIndex(frag => frag.url === currentUrl);
-  let count = 0;
-  while (nextIndex < playlist.length - 1 && count < skipLoopLimit) {
-    nextIndex++; count++;
-    if (!weightedAdSet.has(playlist[nextIndex].url)) {
-      hls.currentTime = playlist[nextIndex].start;
-      hls.startLoad?.();
-      break;
-    }
   }
 }
 
 class AdAwareLoader extends Hls.DefaultConfig.loader {
-  static _alreadyInitLog = false;
   constructor(config) {
     super(config);
-    const customConfig = config.p2pConfig || {};
-    this.adFilteringEnabled = customConfig.adFilteringEnabled !== false;
-    this.debugMode = customConfig.debugMode === true;
-    this.logPrefix = '[AdBlocker]';
-    if (this.debugMode && !AdAwareLoader._alreadyInitLog) {
-      console.log(`${this.logPrefix} Initialized. Ad skipping is ${this.adFilteringEnabled ? 'ENABLED' : 'DISABLED'}.`);
-      AdAwareLoader._alreadyInitLog = true;
-    }
+    this.adFilteringEnabled = !(config.p2pConfig?.adFilteringEnabled === false);
+    this.debug = config.p2pConfig?.debugMode === true;
   }
-  _stripManifest(manifestText, manifestUrl) {
-    if (!this.adFilteringEnabled) return manifestText;
-    handleManifestSampling(manifestText, manifestUrl);
-    return manifestText;
+  _stripManifest(text, url) {
+    handleManifest(text, url);
+    return text;
   }
-  load(context, config, callbacks) {
-    const { type, url } = context;
-    if (this.adFilteringEnabled && (type === "manifest" || type === "level")) {
-      const originalOnSuccess = callbacks.onSuccess;
-      callbacks.onSuccess = (response, stats, context) => {
-        if (typeof response.data === "string") {
-          response.data = this._stripManifest(response.data, url);
+  load(ctx, cfg, callbacks) {
+    if (this.adFilteringEnabled && (ctx.type === 'manifest' || ctx.type === 'level')) {
+      const orig = callbacks.onSuccess;
+      callbacks.onSuccess = (res, stats, context) => {
+        if (typeof res.data === 'string') {
+          res.data = this._stripManifest(res.data, context.url);
         }
-        originalOnSuccess(response, stats, context);
+        orig(res, stats, context);
       };
     }
-    super.load(context, config, callbacks);
+    super.load(ctx, cfg, callbacks);
   }
 }
 
-export function getHlsConfig(options = {}) {
+export function getHlsConfig(opts = {}) {
   return {
     p2pConfig: {
-      adFilteringEnabled: options.adFilteringEnabled !== false,
-      debugMode: options.debugMode === true,
+      adFilteringEnabled: opts.adFilteringEnabled !== false,
+      debugMode: opts.debugMode === true
     },
     loader: AdAwareLoader,
     maxBufferLength: 60,
     maxBufferSize: 100 * 1000 * 1000,
     fragLoadingMaxRetry: 4,
-    manifestLoadingMaxRetry: 2,
+    manifestLoadingMaxRetry: 2
   };
 }
 
 export function attachAdSkipLogic(hls) {
-  hls.on(Hls.Events.FRAG_LOADING, function (event, data) {
-    const fragUrl = data?.frag?.url;
-    if (!fragUrl) return;
-    if (
-      (votingActive && adTsSet.size && adTsSet.has(fragUrl)) ||
-      (useWeightedFallback && weightedAdSet.has(fragUrl))
-    ) {
-      const playlist = hls.levels[hls.currentLevel]?.details?.fragments || [];
-      let nextIndex = playlist.findIndex(frag => frag.url === fragUrl);
-      let count = 0;
-      while (nextIndex < playlist.length - 1 && count < skipLoopLimit) {
-        nextIndex++; count++;
-        const nextUrl = playlist[nextIndex].url;
-        if (
-          (votingActive && (!adTsSet.has(nextUrl))) ||
-          (useWeightedFallback && !weightedAdSet.has(nextUrl))
-        ) {
-          hls.currentTime = playlist[nextIndex].start;
-          hls.startLoad?.();
+  let skipping = false;
+  hls.on(Hls.Events.FRAG_LOADING, (_e, data) => {
+    if (skipping) return;
+    const url = data.frag.url;
+    const isAd = votingActive ? adTsSet.has(url) : weightedAdSet.has(url);
+    if (isAd) {
+      skipping = true;
+      const frags = hls.levels[hls.currentLevel]?.details?.fragments || [];
+      let i = frags.findIndex(f => f.url === url);
+      while (++i < frags.length) {
+        const next = frags[i].url;
+        const ok = votingActive ? !adTsSet.has(next) : !weightedAdSet.has(next);
+        if (ok) {
+          hls.currentTime = frags[i].start;
+          hls.startLoad();
           break;
         }
       }
+      setTimeout(() => { skipping = false; }, 100);
     }
-  });
-  hls.on(Hls.Events.FRAG_CHANGED, function (event, data) {
-    const fragUrl = data.frag.url;
-    skipIfAd(fragUrl, hls);
-  });
-  hls.on(Hls.Events.FRAG_BUFFERED, function (event, data) {
-    const fragUrl = data.frag.url;
-    skipIfAd(fragUrl, hls);
   });
 }
 
 export function resetAdDetectionState() {
   weightedAdSet.clear();
-  checkedSample = false;
-  useWeightedFallback = false;
-  votingActive = false;
-  mainDirStat = {};
-  mainSecondDir = '';
   adTsSet.clear();
-  skipHistorySet.clear();
+  votingActive = false;
 }
