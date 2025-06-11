@@ -1,5 +1,14 @@
 <template>
-  <div ref="artplayerRef" class="artplayer-container"></div>
+  <div ref="artplayerRef" class="artplayer-container">
+    <transition name="fade">
+      <div v-if="adMask" class="ad-mask">
+        <div class="ad-loading">
+          <span class="spinner"></span>
+          <span>正在为你自动跳过片头/广告…</span>
+        </div>
+      </div>
+    </transition>
+  </div>
 </template>
 
 <script setup>
@@ -16,6 +25,8 @@ const props = defineProps({
 const emit = defineEmits(["timeupdate", "ended", "ready", "error"]);
 
 const artplayerRef = ref(null);
+const adMask = ref(false);
+
 let art = null;
 let hls = null;
 let initializeId = 0;
@@ -74,7 +85,7 @@ async function unlockOrientation() {
   }
 }
 
-// 核心：广告片段倍速+静音，正片恢复
+// 核心：广告片段倍速+静音+遮罩，正片恢复
 function attachAdPlaybackControl(hls, art) {
   let lastState = null;
   hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => {
@@ -82,12 +93,14 @@ function attachAdPlaybackControl(hls, art) {
     const isAd = isAdFragmentTs(fragUrl);
     if (!art || !art.video) return;
     if (isAd && lastState !== "ad") {
-      art.video.playbackRate = 9.0;
+      art.video.playbackRate = 4.0;
       art.video.muted = true;
+      adMask.value = true;
       lastState = "ad";
     } else if (!isAd && lastState !== "normal") {
       art.video.playbackRate = 1.0;
       art.video.muted = false;
+      adMask.value = false;
       lastState = "normal";
     }
   });
@@ -124,7 +137,6 @@ async function initializePlayer(strategy = "proxy") {
           hls.loadSource(src);
           hls.attachMedia(video);
           player.hls = hls;
-          // 广告片段倍速+静音
           attachAdPlaybackControl(hls, player);
           player.on("destroy", () => hls && hls.destroy());
         } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
@@ -234,5 +246,37 @@ onBeforeUnmount(() => {
   height: 500px;
   background-color: #000;
   position: relative;
+}
+.ad-mask {
+  position: absolute;
+  z-index: 999;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(10,10,10,0.92);
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+.ad-loading {
+  display: flex; flex-direction: column; align-items: center;
+  color: #ffe066;
+  font-size: 20px;
+  font-weight: 600;
+}
+.spinner {
+  display: inline-block;
+  width: 44px; height: 44px;
+  border: 4px solid #ffe066;
+  border-radius: 50%;
+  border-top-color: transparent;
+  animation: spin 1s linear infinite;
+  margin-bottom: 18px;
+}
+@keyframes spin {
+  100% { transform: rotate(360deg);}
+}
+.fade-enter-active, .fade-leave-active {
+  transition: opacity .3s;
+}
+.fade-enter-from, .fade-leave-to {
+  opacity: 0;
 }
 </style>
