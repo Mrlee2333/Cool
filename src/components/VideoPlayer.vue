@@ -61,7 +61,7 @@ function attachAdPlaybackControl(hls, art) {
     const isAd = isAdFragmentTs(fragUrl);
     if (!art || !art.video) return;
     if (isAd && lastState !== "ad") {
-      art.video.playbackRate = 8.0;
+      art.video.playbackRate = 6.0;
       art.video.muted = true;
       lastState = "ad";
     } else if (!isAd && lastState !== "normal") {
@@ -151,7 +151,7 @@ async function initializePlayer(strategy = "direct") {
     } else if (strategy === "proxy") {
       emit("error", new Error("播放超时：直连和代理都不可用"));
     }
-  }, strategy === "direct" ? 5000 : 6000);
+  }, strategy === "direct" ? 8000 : 8000);
 }
 
 watch(() => props.episodeUrl, () => {
