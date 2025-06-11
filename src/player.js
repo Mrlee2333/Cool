@@ -1,6 +1,11 @@
 import Hls from 'hls.js';
 
-// ========== 广告特征 ==========
+const VOTING_HOSTS = [
+  'kkzycdn.com:65',
+  'vod.360zyx.vip',
+  'bfikuncdn.com',
+];
+
 const AD_KEYWORDS = [
   '/ads/', 'advertis', '//ad.', '.com/ad/', '.com/ads/', 'tracking',
   'doubleclick.net', 'googleads.g.doubleclick.net', 'googlesyndication.com',
@@ -13,25 +18,30 @@ const AD_REGEX = [
 ];
 const AD_TS_RE = /\/(?:ad|ads|adv|preroll|gg|sponsor)[^\/]*\.ts([?#]|$)/i;
 
-const VOTING_HOSTS = [
-  'bfikuncdn.com',
-  'kkzycdn.com:65',
-  'vod.360zyx.vip'
-];
-
-// ========== 全局变量 ==========
-let weightedAdSet = new Set();
 let votingAdSet = new Set();
+let weightedAdSet = new Set();
 let votingActive = false;
+let mainDir = '';
 
 function isVotingHost(url) {
-  return VOTING_HOSTS.some(h => url.includes(h));
+  return VOTING_HOSTS.some(host => url.includes(host));
 }
 
 function getSecondDir(url) {
-  const u = url.split('?')[0].split('#')[0];
-  const m = u.match(/^https?:\/\/[^/]+(\/[^/]+\/[^/]+)\//);
-  return m ? m[1] : '';
+  try {
+    const u = url.split('?')[0].split('#')[0];
+    const m = u.match(/^https?:\/\/[^/]+(\/[^/]+\/[^/]+)\//);
+    return m ? m[1] : '';
+  } catch { return ''; }
+}
+
+function normalizeTsUrl(url) {
+  try {
+    const u = new URL(url);
+    return `${u.protocol}//${u.host}${u.pathname}`.toLowerCase();
+  } catch {
+    return url.split('?')[0].split('#')[0].toLowerCase();
+  }
 }
 
 function isLikelyAd(url) {
@@ -43,12 +53,6 @@ function isLikelyAd(url) {
   return score >= 2;
 }
 
-// 统一标准化 ts url（去参数、#、小写）
-function normalizeTsUrl(url) {
-  return url ? url.replace(/(\?.*)|(#.*)/g, '').toLowerCase() : '';
-}
-
-// ========== 加权法 ==========
 function buildWeightedAdSet(manifest) {
   weightedAdSet.clear();
   manifest.split(/\r?\n/).forEach(line => {
@@ -57,7 +61,6 @@ function buildWeightedAdSet(manifest) {
   });
 }
 
-// ========== 投票法 ==========
 function buildVotingAdSet(manifest) {
   const counts = {};
   votingAdSet.clear();
@@ -66,20 +69,16 @@ function buildVotingAdSet(manifest) {
     const d = getSecondDir(u);
     if (d) counts[d] = (counts[d] || 0) + 1;
   });
-  let main = '', max = 0;
-  Object.entries(counts).forEach(([d, c]) => c > max && (max = c, main = d));
-  lines.forEach(u => getSecondDir(u) !== main && votingAdSet.add(normalizeTsUrl(u)));
-  if (votingAdSet.size) {
-    console.log('[AdBlocker][投票法识别广告片段]', votingAdSet);
-  }
+  mainDir = '';
+  let max = 0;
+  Object.entries(counts).forEach(([d, c]) => c > max && (max = c, mainDir = d));
+  lines.forEach(u => getSecondDir(u) !== mainDir && votingAdSet.add(normalizeTsUrl(u)));
 }
 
-// ========== m3u8 采样主入口 ==========
 function updateAdSets(manifest, url) {
   votingActive = isVotingHost(url);
   if (votingActive) buildVotingAdSet(manifest);
   else buildWeightedAdSet(manifest);
-  // 挂到 window 方便调试（配合 VideoPlayer.vue Toast）
   if (typeof window !== 'undefined') {
     window.votingActive = votingActive;
     window.votingAdSet = votingAdSet;
@@ -88,16 +87,13 @@ function updateAdSets(manifest, url) {
 }
 
 class AdLoader extends Hls.DefaultConfig.loader {
-  constructor(cfg) {
-    super(cfg);
-    this.enabled = cfg.p2pConfig?.adFilteringEnabled !== false;
-  }
+  constructor(cfg) { super(cfg); }
   _stripManifest(txt, url) {
     updateAdSets(txt, url);
     return txt;
   }
   load(ctx, cfg, cb) {
-    if (this.enabled && (ctx.type === 'manifest' || ctx.type === 'level')) {
+    if (ctx.type === 'manifest' || ctx.type === 'level') {
       const o = cb.onSuccess;
       cb.onSuccess = (res, st, c) => {
         if (typeof res.data === 'string') res.data = this._stripManifest(res.data, c.url);
@@ -111,7 +107,7 @@ class AdLoader extends Hls.DefaultConfig.loader {
 export function getHlsConfig(opts = {}) {
   return {
     p2pConfig: {
-      adFilteringEnabled: opts.adFilteringEnabled !== false,
+      adFilteringEnabled: true,
       debugMode: opts.debugMode === true
     },
     loader: AdLoader,
@@ -122,36 +118,40 @@ export function getHlsConfig(opts = {}) {
   };
 }
 
-// ========== 跳播事件绑定 ==========
+// 智能提前跳播，不卡死不卡顿
 export function attachAdSkipLogic(hls) {
-  let skipCount = 0;
-  const SKIP_MAX = 10;
   hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => {
-    const url = normalizeTsUrl(data.frag.url);
-    const isAd = votingActive
-      ? votingAdSet.has(url)
-      : weightedAdSet.has(url);
-    if (isAd && skipCount < SKIP_MAX) {
-      skipCount++;
-      const frags = hls.levels[hls.currentLevel]?.details?.fragments || [];
-      let i = frags.findIndex(f => normalizeTsUrl(f.url) === url);
-      while (++i < frags.length) {
-        const next = normalizeTsUrl(frags[i].url);
-        const ok = votingActive
-          ? !votingAdSet.has(next)
-          : !weightedAdSet.has(next);
-        if (ok) {
-          hls.currentTime = frags[i].start;
-          hls.startLoad();
-          console.log('[AdBlocker][跳播广告]', url, '→', next);
-          break;
-        }
+    const currentUrl = normalizeTsUrl(data.frag.url);
+    const frags = hls.levels[hls.currentLevel]?.details?.fragments || [];
+    let i = frags.findIndex(f => normalizeTsUrl(f.url) === currentUrl);
+    if (i < 0) return;
+
+    // 判断当前 host 用哪种方式过滤
+    let isAd = false, adSet = null;
+    if (votingActive) {
+      adSet = votingAdSet;
+    } else {
+      adSet = weightedAdSet;
+    }
+    isAd = adSet.has(currentUrl);
+
+    // 如果当前不是广告，提前判断“接下来的片段”
+    if (!isAd) {
+      let j = i + 1;
+      // 找到下一个广告片段（若有，直接跳过所有广告跳到下一个正常片段）
+      let foundAd = false;
+      while (j < frags.length && adSet.has(normalizeTsUrl(frags[j].url))) {
+        foundAd = true;
+        j++;
+      }
+      // j现在指向下一个正常片段
+      if (foundAd && j < frags.length) {
+        hls.currentTime = frags[j].start;
+        hls.startLoad();
+        if (typeof window !== 'undefined' && window.console)
+          console.log('[AdBlocker] 提前跳过广告片段，直接跳到', frags[j].url);
       }
     }
-    if (skipCount >= SKIP_MAX) {
-      console.warn('[AdBlocker] 跳播广告次数过多，停止自动跳播');
-    }
-    if (!isAd) skipCount = 0;
   });
 }
 
@@ -159,6 +159,7 @@ export function resetAdDetectionState() {
   weightedAdSet.clear();
   votingAdSet.clear();
   votingActive = false;
+  mainDir = '';
   if (typeof window !== 'undefined') {
     window.votingActive = false;
     window.votingAdSet = undefined;
