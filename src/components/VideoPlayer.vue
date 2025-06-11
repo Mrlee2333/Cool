@@ -1,21 +1,5 @@
 <template>
-  <div
-    ref="artplayerRef"
-    class="artplayer-container"
-    :class="{
-      'ad-active-mobile': adMask && isMobile,
-      'ad-active-pc': adMask && !isMobile
-    }"
-  >
-    <div v-if="adMask" class="ad-overlay">
-      <img
-        class="ad-image"
-        :class="isMobile ? 'mobile-image' : 'pc-image'"
-        src="https://testingcf.jsdelivr.net/gh/macklee6/hahah/ok.gif"
-        alt="广告中..."
-      />
-    </div>
-  </div>
+  <div ref="artplayerRef" class="artplayer-container"></div>
 </template>
 
 <script setup>
@@ -32,9 +16,6 @@ const props = defineProps({
 const emit = defineEmits(["timeupdate", "ended", "ready", "error"]);
 
 const artplayerRef = ref(null);
-const adMask = ref(false);
-const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-
 let art = null;
 let hls = null;
 let initializeId = 0;
@@ -42,6 +23,8 @@ let hasPlayed = false;
 let triedDirect = false;
 let triedProxy = false;
 let playTimeout = null;
+
+const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 
 function buildProxyUrl(targetUrl) {
   const proxyBase = import.meta.env.VITE_NETLIFY_PROXY_URL;
@@ -70,8 +53,42 @@ function onPlaying() {
   clearTimeout(playTimeout);
 }
 
+// Artplayer 广告遮罩插件
+function createAdMaskPlugin(isMobile) {
+  return (art) => {
+    const mask = document.createElement('div');
+    mask.className = "ad-mask-plugin";
+    const img = document.createElement('img');
+    img.src = "https://testingcf.jsdelivr.net/gh/macklee6/hahah/ok.gif";
+    img.alt = "广告中...";
+    img.className = isMobile ? "ad-image-mobile" : "ad-image-pc";
+
+    const text = document.createElement("div");
+    text.className = "ad-text";
+    text.textContent = "正在跳过广告";
+
+    mask.appendChild(img);
+    mask.appendChild(text);
+
+    // 插入/移除遮罩
+    return {
+      name: "admask",
+      show() {
+        // 设置白色背景
+        art.template.$container.classList.add(isMobile ? "ad-bg-mobile" : "ad-bg-pc");
+        if (!mask.isConnected) art.template.$container.appendChild(mask);
+      },
+      hide() {
+        art.template.$container.classList.remove("ad-bg-mobile", "ad-bg-pc");
+        if (mask.isConnected) mask.remove();
+      }
+    };
+  };
+}
+
 function attachAdPlaybackControl(hls, art) {
   let lastState = null;
+  const admask = art.plugins.admask; // 插件实例
   hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => {
     const fragUrl = data.frag.url;
     const isAd = isAdFragmentTs(fragUrl);
@@ -79,12 +96,12 @@ function attachAdPlaybackControl(hls, art) {
     if (isAd && lastState !== "ad") {
       art.video.playbackRate = 4.0;
       art.video.muted = true;
-      adMask.value = true;
+      admask && admask.show();
       lastState = "ad";
     } else if (!isAd && lastState !== "normal") {
       art.video.playbackRate = 1.0;
       art.video.muted = false;
-      adMask.value = false;
+      admask && admask.hide();
       lastState = "normal";
     }
   });
@@ -100,6 +117,8 @@ async function initializePlayer(strategy = "proxy") {
       ? buildProxyUrl(props.episodeUrl)
       : props.episodeUrl;
 
+  const adMaskPlugin = createAdMaskPlugin(isMobile);
+
   const playerOptions = {
     ...props.option,
     container: artplayerRef.value,
@@ -111,6 +130,7 @@ async function initializePlayer(strategy = "proxy") {
     pip: true,
     fullscreen: true,
     flip: true,
+    plugins: [adMaskPlugin],
     customType: {
       m3u8(video, src, player) {
         if (Hls.isSupported()) {
@@ -197,40 +217,59 @@ onBeforeUnmount(() => cleanup());
   height: 500px;
   background-color: #000;
   position: relative;
-  transition: background 0.2s ease;
+  transition: background 0.2s;
 }
 
-.ad-active-mobile,
-.ad-active-pc {
-  background-color: #fff !important;
+.ad-bg-mobile,
+.ad-bg-pc {
+  background: #fff !important;
+  transition: background 0.2s;
 }
 
-.ad-overlay {
+.ad-mask-plugin {
   position: absolute;
   inset: 0;
-  background-color: transparent;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   justify-content: center;
+  align-items: center;
   pointer-events: none;
   z-index: 999;
+  background: transparent;
 }
-
-.ad-image {
-  user-select: none;
-  pointer-events: none;
-}
-
-.mobile-image {
+.ad-image-mobile {
   width: 88px;
   height: 88px;
-  border-radius: 50%;
-}
-
-.pc-image {
-  max-width: 65%;
-  max-height: 75%;
+  border-radius: 44px;
+  margin-bottom: 16px;
+  user-select: none;
+  pointer-events: none;
   object-fit: contain;
-  border-radius: 16px;
+  box-shadow: 0 0 18px #ffe066bb;
+  background: rgba(255,255,255,0.09);
+}
+.ad-image-pc {
+  max-width: 60%;
+  max-height: 70%;
+  border-radius: 18px;
+  margin-bottom: 18px;
+  user-select: none;
+  pointer-events: none;
+  object-fit: contain;
+  box-shadow: 0 0 20px #ffe066bb;
+  background: rgba(255,255,255,0.09);
+}
+.ad-text {
+  color: #222;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-shadow: 0 2px 12px #fff9, 0 1px 0 #fff;
+  background: rgba(255,255,255,0.7);
+  border-radius: 8px;
+  padding: 7px 20px 6px 20px;
+  margin-top: 4px;
+  box-shadow: 0 0 2px #fff7;
+  user-select: none;
 }
 </style>
