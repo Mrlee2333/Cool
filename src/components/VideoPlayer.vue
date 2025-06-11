@@ -1,7 +1,13 @@
 <template>
   <div ref="artplayerRef" class="artplayer-container"
-       :style="adMask ? {background: '#fff'} : {}">
-    <div v-if="adMask" class="global-ad-mask">
+    :class="{
+      'ad-bg': adMask
+    }">
+    <!-- 遮罩，z-index 极高保证一定可见 -->
+    <div
+      v-if="adMask"
+      class="ad-mask-absolute-force"
+    >
       <img
         class="ad-image-final"
         src="https://testingcf.jsdelivr.net/gh/macklee6/hahah/ok.gif"
@@ -65,6 +71,7 @@ function onPlaying() {
   clearTimeout(playTimeout);
 }
 
+// 核心：广告倍速+静音+遮罩控制
 function attachAdPlaybackControl(hls, art) {
   let lastState = null;
   hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => {
@@ -197,14 +204,11 @@ onBeforeUnmount(() => cleanup());
   transition: background 0.2s;
   overflow: hidden;
 }
-
-.ad-bg-mobile,
-.ad-bg-pc {
+.ad-bg {
   background: #fff !important;
   transition: background 0.2s;
 }
-
-.global-ad-mask {
+.ad-mask-absolute-force {
   position: absolute;
   inset: 0;
   display: flex;
@@ -212,15 +216,14 @@ onBeforeUnmount(() => cleanup());
   justify-content: center;
   align-items: center;
   pointer-events: none;
-  z-index: 99999;
-  background: rgba(255,255,255,0.02);
+  z-index: 2147483647;
+  background: rgba(255,255,255,0.05);
 }
-
 .ad-image-final {
   width: 88px;
   height: 88px;
-  max-width: 180px;
-  max-height: 180px;
+  max-width: 188px;
+  max-height: 188px;
   border-radius: 50%;
   margin-bottom: 18px;
   user-select: none;
