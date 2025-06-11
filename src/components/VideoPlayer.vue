@@ -1,13 +1,26 @@
 <template>
-  <div ref="artplayerRef" class="artplayer-container">
-    <transition name="fade">
-      <div v-if="adMask" class="ad-mask">
-        <div class="ad-loading">
-          <span class="spinner"></span>
-          <span>正在为你自动跳过片头/广告…</span>
-        </div>
-      </div>
-    </transition>
+  <div
+    ref="artplayerRef"
+    class="artplayer-container"
+    :class="{
+      'ad-bg': adMask && isMobile,
+      'ad-bg-pc': adMask && !isMobile
+    }"
+  >
+    <div v-if="adMask" class="ad-mask">
+      <img
+        v-if="isMobile"
+        class="ad-loading-img-mobile"
+        src="https://testingcf.jsdelivr.net/gh/macklee6/hahah/ok.gif"
+        alt="自动跳过广告"
+      />
+      <img
+        v-else
+        class="ad-loading-img-pc"
+        src="https://testingcf.jsdelivr.net/gh/macklee6/hahah/ok.gif"
+        alt="自动跳过广告"
+      />
+    </div>
   </div>
 </template>
 
@@ -27,6 +40,9 @@ const emit = defineEmits(["timeupdate", "ended", "ready", "error"]);
 const artplayerRef = ref(null);
 const adMask = ref(false);
 
+const isMobile =
+  /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+
 let art = null;
 let hls = null;
 let initializeId = 0;
@@ -34,10 +50,6 @@ let hasPlayed = false;
 let triedDirect = false;
 let triedProxy = false;
 let playTimeout = null;
-
-function isMobile() {
-  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-}
 
 function buildProxyUrl(targetUrl) {
   const proxyBase = import.meta.env.VITE_NETLIFY_PROXY_URL;
@@ -70,22 +82,7 @@ function onPlaying() {
   clearTimeout(playTimeout);
 }
 
-async function lockLandscape() {
-  if (screen.orientation?.lock && isMobile()) {
-    try {
-      await screen.orientation.lock("landscape");
-    } catch {}
-  }
-}
-async function unlockOrientation() {
-  if (screen.orientation?.unlock && isMobile()) {
-    try {
-      await screen.orientation.unlock();
-    } catch {}
-  }
-}
-
-// 核心：广告片段倍速+静音+遮罩，正片恢复
+// 广告片段倍速+静音+遮罩，正片恢复
 function attachAdPlaybackControl(hls, art) {
   let lastState = null;
   hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => {
@@ -151,12 +148,6 @@ async function initializePlayer(strategy = "proxy") {
 
   art = new Artplayer(playerOptions);
 
-  art.on("fullscreen", isFull => {
-    if (id !== initializeId) return;
-    if (isFull) lockLandscape();
-    else unlockOrientation();
-  });
-
   art.on("ready", () => {
     if (id !== initializeId) return;
     if (props.startTime > 0) {
@@ -212,7 +203,7 @@ async function initializePlayer(strategy = "proxy") {
       return;
     }
     emit("error", new Error("播放超时"));
-  }, strategy === "proxy" ? 6000 : 6000);
+  }, 6000);
 }
 
 watch(
@@ -236,8 +227,8 @@ watch(
 onMounted(() => initializePlayer("proxy"));
 onBeforeUnmount(() => {
   cleanup();
-  unlockOrientation();
 });
+
 </script>
 
 <style scoped>
@@ -246,37 +237,41 @@ onBeforeUnmount(() => {
   height: 500px;
   background-color: #000;
   position: relative;
+  transition: background 0.25s;
+}
+.ad-bg,
+.ad-bg-pc {
+  background: #fff !important;
+  transition: background 0.25s;
 }
 .ad-mask {
   position: absolute;
   z-index: 999;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(10,10,10,0.92);
+  background: transparent;
   display: flex; align-items: center; justify-content: center;
   pointer-events: none;
 }
-.ad-loading {
-  display: flex; flex-direction: column; align-items: center;
-  color: #ffe066;
-  font-size: 20px;
-  font-weight: 600;
-}
-.spinner {
-  display: inline-block;
-  width: 44px; height: 44px;
-  border: 4px solid #ffe066;
+.ad-loading-img-mobile {
+  width: 88px;
+  height: 88px;
+  object-fit: contain;
+  user-select: none;
+  pointer-events: none;
   border-radius: 50%;
-  border-top-color: transparent;
-  animation: spin 1s linear infinite;
-  margin-bottom: 18px;
+  box-shadow: 0 0 20px #fff9c2b7;
+  background: rgba(255,255,255,0.09);
 }
-@keyframes spin {
-  100% { transform: rotate(360deg);}
-}
-.fade-enter-active, .fade-leave-active {
-  transition: opacity .3s;
-}
-.fade-enter-from, .fade-leave-to {
-  opacity: 0;
+.ad-loading-img-pc {
+  max-width: 60%;
+  max-height: 70%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  user-select: none;
+  pointer-events: none;
+  border-radius: 12px;
+  box-shadow: 0 0 20px #fff9c2b7;
+  background: rgba(255,255,255,0.09);
 }
 </style>
