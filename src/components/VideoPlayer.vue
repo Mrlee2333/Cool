@@ -1,5 +1,8 @@
 <template>
   <div ref="artplayerContainer" class="artplayer-container"></div>
+  <transition name="fade">
+    <div v-if="adToast" class="ad-toast">{{ adToast }}</div>
+  </transition>
 </template>
 
 <script setup>
@@ -19,8 +22,16 @@ const artplayerContainer = ref(null)
 let art = null
 let hls = null
 let initializeId = 0
-let hasPlayed = false
 let playTimeout = null
+
+const adToast = ref('')
+let toastTimer = null
+
+function showAdToast(msg = '已自动跳过广告片段，若出现卡顿属片源问题') {
+  adToast.value = msg
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => (adToast.value = ''), 3000)
+}
 
 function isMobile() {
   return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
@@ -46,13 +57,10 @@ function cleanup() {
 }
 
 function onTimeupdate() {
-  if (art) {
-    emit('timeupdate', { time: art.currentTime, duration: art.duration })
-  }
+  if (art) emit('timeupdate', { time: art.currentTime, duration: art.duration })
 }
 
 function onPlaying() {
-  hasPlayed = true
   clearTimeout(playTimeout)
 }
 
@@ -95,7 +103,7 @@ async function initializePlayer(strategy = 'proxy') {
           hls = new Hls(getHlsConfig({ adFilteringEnabled: true, debugMode: true }))
           hls.loadSource(src)
           hls.attachMedia(video)
-          attachAdSkipLogic(hls)
+          attachAdSkipLogicWithToast(hls, showAdToast)
           player.hls = hls
           player.on('destroy', () => hls && hls.destroy())
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
@@ -145,12 +153,10 @@ async function initializePlayer(strategy = 'proxy') {
     }
   })
 
-  // 超时自动切换或报错
   playTimeout = setTimeout(() => {
-    if (id !== initializeId || hasPlayed) return
-    if (strategy === 'proxy') initializePlayer('direct')
-    else emit('error', new Error('播放超时'))
-  }, strategy === 'proxy' ? 5000 : 6000)
+    if (id !== initializeId) return
+    emit('error', new Error('播放超时'))
+  }, 8000)
 }
 
 watch(() => props.episodeUrl, () => {
@@ -167,7 +173,49 @@ onMounted(() => initializePlayer('proxy'))
 onBeforeUnmount(() => {
   cleanup()
   unlockOrientation()
+  clearTimeout(toastTimer)
 })
+
+/** 包装跳播事件，用户有广告时toast提示 */
+function attachAdSkipLogicWithToast(hls, showAdToast) {
+  let skipCount = 0
+  const SKIP_MAX = 10
+  hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => {
+    const url = data.frag.url
+    // 下面两行与 player.js 保持一致
+    const voting = hls.config.p2pConfig?.votingActive
+    const weightedAdSet = hls.config.p2pConfig?.weightedAdSet
+    const votingAdSet = hls.config.p2pConfig?.votingAdSet
+    // 兼容player.js中的全局变量
+    let isAd = false
+    if (typeof window !== 'undefined') {
+      isAd = window.votingActive
+        ? window.votingAdSet?.has(url)
+        : window.weightedAdSet?.has(url)
+    }
+    if (isAd && skipCount < SKIP_MAX) {
+      skipCount++
+      const frags = hls.levels[hls.currentLevel]?.details?.fragments || []
+      let i = frags.findIndex(f => f.url === url)
+      while (++i < frags.length) {
+        const next = frags[i].url
+        const ok = window.votingActive
+          ? !window.votingAdSet?.has(next)
+          : !window.weightedAdSet?.has(next)
+        if (ok) {
+          hls.currentTime = frags[i].start
+          hls.startLoad()
+          showAdToast()
+          break
+        }
+      }
+    }
+    if (skipCount >= SKIP_MAX) {
+      showAdToast('广告太多，已停止自动跳播')
+    }
+    if (!isAd) skipCount = 0
+  })
+}
 </script>
 
 <style scoped>
@@ -175,5 +223,28 @@ onBeforeUnmount(() => {
   width: 100%;
   aspect-ratio: 16/9;
   background-color: #000;
+  position: relative;
+}
+
+.ad-toast {
+  position: absolute;
+  top: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(24,24,24,0.9);
+  color: #ffe066;
+  padding: 8px 24px;
+  font-size: 15px;
+  border-radius: 30px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.13);
+  pointer-events: none;
+  z-index: 99;
+  white-space: nowrap;
+}
+.fade-enter-active, .fade-leave-active {
+  transition: opacity .3s;
+}
+.fade-enter-from, .fade-leave-to {
+  opacity: 0;
 }
 </style>

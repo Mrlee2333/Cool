@@ -72,7 +72,6 @@ class AdLoader extends Hls.DefaultConfig.loader {
   constructor(cfg) {
     super(cfg);
     this.enabled = cfg.p2pConfig?.adFilteringEnabled !== false;
-    this.debug = cfg.p2pConfig?.debugMode === true;
   }
   _stripManifest(txt, url) {
     updateAdSets(txt, url);
@@ -105,13 +104,13 @@ export function getHlsConfig(opts = {}) {
 }
 
 export function attachAdSkipLogic(hls) {
-  let skipping = false;
-  hls.on(Hls.Events.FRAG_LOADING, (_e, data) => {
-    if (skipping) return;
+  let skipCount = 0;
+  const SKIP_MAX = 10;
+  hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => {
     const url = data.frag.url;
     const isAd = votingActive ? votingAdSet.has(url) : weightedAdSet.has(url);
-    if (isAd) {
-      skipping = true;
+    if (isAd && skipCount < SKIP_MAX) {
+      skipCount++;
       const frags = hls.levels[hls.currentLevel]?.details?.fragments || [];
       let i = frags.findIndex(f => f.url === url);
       while (++i < frags.length) {
@@ -123,8 +122,11 @@ export function attachAdSkipLogic(hls) {
           break;
         }
       }
-      setTimeout(() => { skipping = false; }, 100);
     }
+    if (skipCount >= SKIP_MAX) {
+      hls.config?.debugMode && console.error('[AdBlocker] 跳播次数过多，已停止自动跳播。');
+    }
+    if (!isAd) skipCount = 0;
   });
 }
 
