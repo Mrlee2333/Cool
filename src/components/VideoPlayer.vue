@@ -3,22 +3,16 @@
     ref="artplayerRef"
     class="artplayer-container"
     :class="{
-      'ad-bg': adMask && isMobile,
-      'ad-bg-pc': adMask && !isMobile
+      'ad-active-mobile': adMask && isMobile,
+      'ad-active-pc': adMask && !isMobile
     }"
   >
-    <div v-if="adMask" class="ad-mask">
+    <div v-if="adMask" class="ad-overlay">
       <img
-        v-if="isMobile"
-        class="ad-loading-img-mobile"
+        class="ad-image"
+        :class="isMobile ? 'mobile-image' : 'pc-image'"
         src="https://testingcf.jsdelivr.net/gh/macklee6/hahah/ok.gif"
-        alt="自动跳过广告"
-      />
-      <img
-        v-else
-        class="ad-loading-img-pc"
-        src="https://testingcf.jsdelivr.net/gh/macklee6/hahah/ok.gif"
-        alt="自动跳过广告"
+        alt="广告中..."
       />
     </div>
   </div>
@@ -39,9 +33,7 @@ const emit = defineEmits(["timeupdate", "ended", "ready", "error"]);
 
 const artplayerRef = ref(null);
 const adMask = ref(false);
-
-const isMobile =
-  /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 
 let art = null;
 let hls = null;
@@ -54,10 +46,7 @@ let playTimeout = null;
 function buildProxyUrl(targetUrl) {
   const proxyBase = import.meta.env.VITE_NETLIFY_PROXY_URL;
   if (!proxyBase) return targetUrl;
-  const encodedTarget = encodeURIComponent(targetUrl);
-  return proxyBase.endsWith("/")
-    ? proxyBase + encodedTarget
-    : proxyBase + "/" + encodedTarget;
+  return proxyBase.replace(/\/$/, "") + "/" + encodeURIComponent(targetUrl);
 }
 
 function cleanup() {
@@ -73,8 +62,7 @@ function cleanup() {
 }
 
 function onTimeupdate() {
-  if (art)
-    emit("timeupdate", { time: art.currentTime, duration: art.duration });
+  if (art) emit("timeupdate", { time: art.currentTime, duration: art.duration });
 }
 
 function onPlaying() {
@@ -82,7 +70,6 @@ function onPlaying() {
   clearTimeout(playTimeout);
 }
 
-// 广告片段倍速+静音+遮罩，正片恢复
 function attachAdPlaybackControl(hls, art) {
   let lastState = null;
   hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => {
@@ -108,8 +95,6 @@ async function initializePlayer(strategy = "proxy") {
   cleanup();
   hasPlayed = false;
 
-  if (!artplayerRef.value || !props.episodeUrl) return;
-
   const playUrl =
     strategy === "proxy"
       ? buildProxyUrl(props.episodeUrl)
@@ -129,7 +114,6 @@ async function initializePlayer(strategy = "proxy") {
     customType: {
       m3u8(video, src, player) {
         if (Hls.isSupported()) {
-          if (player.hls) player.hls.destroy();
           hls = new Hls(getHlsConfig({}));
           hls.loadSource(src);
           hls.attachMedia(video);
@@ -138,9 +122,9 @@ async function initializePlayer(strategy = "proxy") {
           player.on("destroy", () => hls && hls.destroy());
         } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
           video.src = src;
-          player.notice.show("原生 HLS，无法过滤广告", 2500);
+          player.notice.show("原生HLS，无法去广告", 2000);
         } else {
-          player.notice.show("浏览器不支持此视频格式");
+          player.notice.show("浏览器不支持播放此格式");
         }
       },
     },
@@ -152,10 +136,7 @@ async function initializePlayer(strategy = "proxy") {
     if (id !== initializeId) return;
     if (props.startTime > 0) {
       setTimeout(() => {
-        if (
-          art &&
-          Math.abs(art.currentTime - props.startTime) > 1
-        ) {
+        if (art && Math.abs(art.currentTime - props.startTime) > 1) {
           art.currentTime = props.startTime;
         }
       }, 500);
@@ -165,70 +146,49 @@ async function initializePlayer(strategy = "proxy") {
     emit("ready", art);
   });
 
-  art.on("video:ended", () => {
-    if (id !== initializeId) return;
-    emit("ended");
-  });
+  art.on("video:ended", () => emit("ended"));
 
   art.on("error", err => {
-    if (id !== initializeId) return;
     clearTimeout(playTimeout);
     if (strategy === "proxy" && !triedDirect) {
       triedDirect = true;
       triedProxy = false;
       initializePlayer("direct");
-      return;
-    }
-    if (strategy === "direct" && !triedProxy) {
+    } else if (strategy === "direct" && !triedProxy) {
       triedProxy = true;
       triedDirect = false;
       initializePlayer("proxy");
-      return;
+    } else {
+      emit("error", err || new Error("播放失败"));
     }
-    emit("error", err || new Error("播放失败"));
   });
 
   playTimeout = setTimeout(() => {
-    if (id !== initializeId || hasPlayed) return;
+    if (hasPlayed) return;
     if (strategy === "proxy" && !triedDirect) {
       triedDirect = true;
-      triedProxy = false;
       initializePlayer("direct");
-      return;
-    }
-    if (strategy === "direct" && !triedProxy) {
+    } else if (strategy === "direct" && !triedProxy) {
       triedProxy = true;
-      triedDirect = false;
       initializePlayer("proxy");
-      return;
+    } else {
+      emit("error", new Error("播放超时"));
     }
-    emit("error", new Error("播放超时"));
   }, 6000);
 }
 
-watch(
-  () => props.episodeUrl,
-  () => {
-    triedDirect = false;
-    triedProxy = false;
-    nextTick(() => initializePlayer("proxy"));
-  }
-);
-
-watch(
-  () => props.option.title,
-  title => {
-    if (art?.option?.title !== title) {
-      art.option.title = title;
-    }
-  }
-);
-
-onMounted(() => initializePlayer("proxy"));
-onBeforeUnmount(() => {
-  cleanup();
+watch(() => props.episodeUrl, () => {
+  triedDirect = false;
+  triedProxy = false;
+  nextTick(() => initializePlayer("proxy"));
 });
 
+watch(() => props.option.title, title => {
+  if (art?.option?.title !== title) art.option.title = title;
+});
+
+onMounted(() => initializePlayer("proxy"));
+onBeforeUnmount(() => cleanup());
 </script>
 
 <style scoped>
@@ -237,41 +197,40 @@ onBeforeUnmount(() => {
   height: 500px;
   background-color: #000;
   position: relative;
-  transition: background 0.25s;
+  transition: background 0.2s ease;
 }
-.ad-bg,
-.ad-bg-pc {
-  background: #fff !important;
-  transition: background 0.25s;
+
+.ad-active-mobile,
+.ad-active-pc {
+  background-color: #fff !important;
 }
-.ad-mask {
+
+.ad-overlay {
   position: absolute;
+  inset: 0;
+  background-color: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
   z-index: 999;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: transparent;
-  display: flex; align-items: center; justify-content: center;
+}
+
+.ad-image {
+  user-select: none;
   pointer-events: none;
 }
-.ad-loading-img-mobile {
+
+.mobile-image {
   width: 88px;
   height: 88px;
-  object-fit: contain;
-  user-select: none;
-  pointer-events: none;
   border-radius: 50%;
-  box-shadow: 0 0 20px #fff9c2b7;
-  background: rgba(255,255,255,0.09);
 }
-.ad-loading-img-pc {
-  max-width: 60%;
-  max-height: 70%;
-  width: auto;
-  height: auto;
+
+.pc-image {
+  max-width: 65%;
+  max-height: 75%;
   object-fit: contain;
-  user-select: none;
-  pointer-events: none;
-  border-radius: 12px;
-  box-shadow: 0 0 20px #fff9c2b7;
-  background: rgba(255,255,255,0.09);
+  border-radius: 16px;
 }
 </style>
