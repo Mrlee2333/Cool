@@ -6,7 +6,7 @@
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from "vue";
 import Artplayer from "artplayer";
 import Hls from "hls.js";
-import { getHlsConfig } from "@/player.js"; // 仅保留 getHlsConfig
+import { getHlsConfig, isAdFragmentTs } from "@/player.js";
 
 const props = defineProps({
   option: { type: Object, required: true },
@@ -74,6 +74,25 @@ async function unlockOrientation() {
   }
 }
 
+// 核心：广告片段倍速+静音，正片恢复
+function attachAdPlaybackControl(hls, art) {
+  let lastState = null;
+  hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => {
+    const fragUrl = data.frag.url;
+    const isAd = isAdFragmentTs(fragUrl);
+    if (!art || !art.video) return;
+    if (isAd && lastState !== "ad") {
+      art.video.playbackRate = 4.0;  // 4倍速
+      art.video.muted = true;
+      lastState = "ad";
+    } else if (!isAd && lastState !== "normal") {
+      art.video.playbackRate = 1.0;
+      art.video.muted = false;
+      lastState = "normal";
+    }
+  });
+}
+
 async function initializePlayer(strategy = "proxy") {
   const id = ++initializeId;
   cleanup();
@@ -101,10 +120,12 @@ async function initializePlayer(strategy = "proxy") {
       m3u8(video, src, player) {
         if (Hls.isSupported()) {
           if (player.hls) player.hls.destroy();
-          hls = new Hls(getHlsConfig({ adFilteringEnabled: true, debugMode: true }));
+          hls = new Hls(getHlsConfig({}));
           hls.loadSource(src);
           hls.attachMedia(video);
           player.hls = hls;
+          // 广告片段倍速+静音
+          attachAdPlaybackControl(hls, player);
           player.on("destroy", () => hls && hls.destroy());
         } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
           video.src = src;

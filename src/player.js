@@ -1,9 +1,14 @@
-import Hls from 'hls.js';
+import Hls from "hls.js";
 
-// --- 广告识别规则 ---
+const SPECIAL_HOSTS = [
+  "kkzycdn.com:65",
+  "vod.360zyx.vip",
+  "bfikuncdn.com",
+];
+
 const AD_KEYWORDS = [
-  '/ads/', 'advertis', '//ad.', '.com/ad/', '.com/ads/', 'tracking', 
-  'doubleclick.net', 'googleads.g.doubleclick.net', 'googlesyndication.com', 
+  '/ads/', 'advertis', '//ad.', '.com/ad/', '.com/ads/', 'tracking',
+  'doubleclick.net', 'googleads.g.doubleclick.net', 'googlesyndication.com',
   'imasdk.googleapis.com', 'videoad', 'preroll', 'midroll', 'postroll', 'imasdk',
 ];
 const AD_REGEX_RULES = [
@@ -13,101 +18,79 @@ const AD_REGEX_RULES = [
 ];
 const AD_FRAGMENT_URL_RE = /\/(?:ad|ads|adv|preroll|gg)[^\/]*\.ts([?#]|$)/i;
 
-let totalAdCount = 0;
-let totalAdSkipped = 0;
+let adTsSet = new Set();         // 特定站点广告片段
+let isSpecial = false;           // 是否特定站
+let manifestHost = "";           // 当前manifest主机
 
-function isAdUrl(line) {
-  const t = line.trim().toLowerCase();
-  if (!t || t.startsWith('#')) return false;
+function isSpecialHost(url) {
+  return SPECIAL_HOSTS.some(h => url && url.includes(h));
+}
+function getSecondDir(url) {
+  try {
+    const u = url.split("?")[0].split("#")[0];
+    const m = u.match(/^https?:\/\/[^/]+(\/[^/]+\/[^/]+)\//);
+    return m ? m[1] : "";
+  } catch { return ""; }
+}
+function normalizeTsUrl(url) {
+  try {
+    const u = new URL(url);
+    return `${u.protocol}//${u.host}${u.pathname}`.toLowerCase();
+  } catch {
+    return url.split("?")[0].split("#")[0].toLowerCase();
+  }
+}
+
+// 关键字+正则判断（对普通站点生效）
+function isAdUrlByKeyword(url) {
+  const t = url.trim().toLowerCase();
   for (const keyword of AD_KEYWORDS) if (t.includes(keyword)) return true;
   for (const re of AD_REGEX_RULES) if (re.test(t)) return true;
   if (AD_FRAGMENT_URL_RE.test(t)) return true;
   return false;
 }
 
-function countAdSegments(manifestText) {
-  let adCount = 0;
-  const lines = manifestText.split(/\r?\n/);
-  for (const line of lines) if (isAdUrl(line)) adCount++;
-  totalAdCount = adCount;
-  if (adCount) {
-    console.info(`[AdBlocker] 共检测到广告片段数: ${adCount}`);
+// 特定网站：采集广告片段set，其他：不处理
+function buildAdSet(manifestText, manifestUrl) {
+  adTsSet.clear();
+  isSpecial = isSpecialHost(manifestUrl);
+  manifestHost = manifestUrl || "";
+  if (isSpecial) {
+    const counts = {};
+    const lines = manifestText.split(/\r?\n/).filter(l => l.trim().endsWith(".ts"));
+    lines.forEach(u => {
+      const d = getSecondDir(u);
+      if (d) counts[d] = (counts[d] || 0) + 1;
+    });
+    let mainDir = "", max = 0;
+    Object.entries(counts).forEach(([d, c]) => {
+      if (c > max) {
+        max = c;
+        mainDir = d;
+      }
+    });
+    lines.forEach(u => {
+      if (getSecondDir(u) !== mainDir) adTsSet.add(normalizeTsUrl(u));
+    });
   }
 }
 
-// --- AdAwareLoader ---
 class AdAwareLoader extends Hls.DefaultConfig.loader {
-  constructor(config) {
-    super(config);
-    const customConfig = config.p2pConfig || {};
-    this.adFilteringEnabled = customConfig.adFilteringEnabled !== false;
-    this.debugMode = customConfig.debugMode === true;
-    this.logPrefix = '[AdBlocker]';
+  constructor(config) { super(config); }
+  _stripManifest(manifestText, manifestUrl) {
+    buildAdSet(manifestText, manifestUrl);
+    return manifestText;
   }
-  _stripManifest(manifestText) {
-    if (!this.adFilteringEnabled) return manifestText;
-    countAdSegments(manifestText);
-
-    let skipCounter = 0;
-    const lines = manifestText.split(/\r?\n/);
-    const filteredLines = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const trimmedLine = line.trim();
-      if (!trimmedLine) continue;
-      if (!trimmedLine.startsWith("#")) {
-        let isAd = isAdUrl(trimmedLine);
-
-        // 不论 debugMode，广告都要过滤掉！
-        if (isAd) {
-          if (
-            filteredLines.length > 0 &&
-            filteredLines[filteredLines.length - 1].startsWith("#EXTINF:")
-          ) {
-            filteredLines.pop();
-          }
-          if (this.debugMode) {
-            console.log(`${this.logPrefix} Skipping ad URL: ${trimmedLine}`);
-          }
-          continue;
-        }
-      }
-      filteredLines.push(line);
-    }
-    return filteredLines.join("\n");
-  }
-
   load(context, config, callbacks) {
     const { type, url } = context;
-    if (this.adFilteringEnabled && (type === "manifest" || type === "level")) {
+    if (type === "manifest" || type === "level") {
       const originalOnSuccess = callbacks.onSuccess;
       callbacks.onSuccess = (response, stats, context) => {
         if (typeof response.data === "string") {
-          response.data = this._stripManifest(response.data);
+          response.data = this._stripManifest(response.data, url);
         }
         originalOnSuccess(response, stats, context);
       };
-    } else if (
-      this.adFilteringEnabled &&
-      type === "fragment" &&
-      AD_FRAGMENT_URL_RE.test(url)
-    ) {
-      totalAdSkipped++;
-      if (totalAdSkipped <= totalAdCount) {
-        console.info(
-          `[AdBlocker] 已跳过广告片段: ${totalAdSkipped}/${totalAdCount}`
-        );
-      }
-      callbacks.onError(
-        {
-          code: Hls.ErrorCodes.NETWORK_ERROR,
-          text: "Ad fragment blocked by client"
-        },
-        context,
-        null
-      );
-      return;
     }
     super.load(context, config, callbacks);
   }
@@ -115,14 +98,19 @@ class AdAwareLoader extends Hls.DefaultConfig.loader {
 
 export function getHlsConfig(options = {}) {
   return {
-    p2pConfig: {
-      adFilteringEnabled: options.adFilteringEnabled !== false,
-      debugMode: options.debugMode === true,
-    },
     loader: AdAwareLoader,
     maxBufferLength: 60,
     maxBufferSize: 100 * 1000 * 1000,
     fragLoadingMaxRetry: 4,
     manifestLoadingMaxRetry: 2,
   };
+}
+
+// 给前端判定广告用（兼容 VideoPlayer.vue）
+export function isAdFragmentTs(url) {
+  if (isSpecial) {
+    return adTsSet.has(normalizeTsUrl(url));
+  } else {
+    return isAdUrlByKeyword(url);
+  }
 }
