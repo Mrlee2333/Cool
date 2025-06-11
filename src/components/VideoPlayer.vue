@@ -6,7 +6,7 @@
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import Artplayer from 'artplayer';
 import Hls from 'hls.js';
-import { getHlsConfig, attachAdSkipLogic } from '@/player.js'; // 去广告配置
+import { getHlsConfig, attachAdSkipLogic, resetAdDetectionState } from '@/player.js';
 
 const props = defineProps({
   option: { type: Object, required: true },
@@ -20,15 +20,15 @@ let art = null;
 let hasSeeked = false;
 let orientationLocking = false;
 
-let playStrategy = ref('proxy');  // 当前：'proxy' 或 'direct'
+let playStrategy = ref('proxy');
 let triedDirect = false;
 let triedProxy = false;
 let hasPlayed = false;
 let playTimeout = null;
 
-let lastSeekTime = -1;  // 用于记录上次seek的时间，避免重复seek
+// 防抖标识
+let initializePlayerDebounceId = 0;
 
-// 判断设备是否为移动端
 function isMobile() {
   return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 }
@@ -36,7 +36,6 @@ function isMobile() {
 function buildProxyUrl(targetUrl) {
   const proxyBase = import.meta.env.VITE_NETLIFY_PROXY_URL;
   if (!proxyBase) return targetUrl;
-
   const encodedTarget = encodeURIComponent(targetUrl);
   return proxyBase.endsWith('/')
     ? proxyBase + encodedTarget
@@ -63,6 +62,7 @@ async function lockOrientationLandscape() {
   } catch (e) {}
   orientationLocking = false;
 }
+
 async function unlockOrientation() {
   if (orientationLocking) return;
   orientationLocking = true;
@@ -85,16 +85,31 @@ function cleanupTimeout() {
   }
 }
 
-// 主初始化函数，支持切换
+// playing事件
+function onPlaying() {
+  hasPlayed = true;
+  cleanupTimeout();
+}
+
+// 初始化播放器（含副作用防抖）
 async function initializePlayer(strategy = 'proxy') {
+  // 增加防抖唯一标识
+  const myId = ++initializePlayerDebounceId;
+
   cleanupTimeout();
   hasPlayed = false;
 
+  // 每次切流/切集前重置广告检测全局状态
+  resetAdDetectionState();
+
   if (!artplayerRef.value || !props.episodeUrl) return;
+
+  // 销毁上一个实例
   if (art) {
     art.destroy(false);
     art = null;
   }
+
   // 选择 url
   const playUrl = strategy === 'proxy' ? buildProxyUrl(props.episodeUrl) : props.episodeUrl;
   playStrategy.value = strategy;
@@ -114,36 +129,38 @@ async function initializePlayer(strategy = 'proxy') {
     fullscreen: true,
     flip: true,
     customType: {
-  m3u8: function playM3u8(video, url, artInstance) {
-    if (Hls.isSupported()) {
-      if (artInstance.hls) artInstance.hls.destroy();
-      const hlsConfig = getHlsConfig({
-        adFilteringEnabled: true,
-        debugMode: true
-      });
-      const hls = new Hls(hlsConfig);
-      hls.loadSource(url);
-      hls.attachMedia(video);
-      artInstance.hls = hls;
-      artInstance.on('destroy', () => { if (hls) hls.destroy() });
-      // !!! 绑定自动跳广告逻辑
-      import('@/player.js').then(({ attachAdSkipLogic }) => {
-        attachAdSkipLogic(hls);
-      });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = url;
-      artInstance.notice.show('当前为原生HLS播放，无法过滤广告', 2500);
-    } else {
-      artInstance.notice.show('您的浏览器不支持播放此视频格式');
+      m3u8: function playM3u8(video, url, artInstance) {
+        if (Hls.isSupported()) {
+          if (artInstance.hls) artInstance.hls.destroy();
+          const hlsConfig = getHlsConfig({
+            adFilteringEnabled: true,
+            debugMode: true
+          });
+          const hls = new Hls(hlsConfig);
+          hls.loadSource(url);
+          hls.attachMedia(video);
+          artInstance.hls = hls;
+          artInstance.on('destroy', () => { if (hls) hls.destroy(); });
+
+          // 绑定广告自动跳过
+          import('@/player.js').then(({ attachAdSkipLogic }) => {
+            attachAdSkipLogic(hls);
+          });
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          video.src = url;
+          artInstance.notice.show('当前为原生HLS播放，无法过滤广告', 2500);
+        } else {
+          artInstance.notice.show('您的浏览器不支持播放此视频格式');
+        }
+      }
     }
-  }
-}
   };
 
   art = new Artplayer(playerOptions);
 
   // 横屏事件
   art.on('fullscreen', (isFull) => {
+    if (myId !== initializePlayerDebounceId) return;
     if (isMobile()) {
       if (isFull) lockOrientationLandscape();
       else unlockOrientation();
@@ -152,11 +169,15 @@ async function initializePlayer(strategy = 'proxy') {
 
   // 进度恢复
   art.on('ready', () => {
-    // 清理超时
+    if (myId !== initializePlayerDebounceId) return;
     cleanupTimeout();
     if (props.startTime && props.startTime > 0) {
       setTimeout(() => {
-        if (art && !hasSeeked && Math.abs(art.currentTime - props.startTime) > 1) {
+        if (
+          art &&
+          !hasSeeked &&
+          Math.abs(art.currentTime - props.startTime) > 1
+        ) {
           art.currentTime = props.startTime;
           hasSeeked = true;
         }
@@ -170,6 +191,7 @@ async function initializePlayer(strategy = 'proxy') {
   });
 
   art.on('destroy', () => {
+    if (myId !== initializePlayerDebounceId) return;
     cleanupTimeout();
     if (art && art.video) {
       art.video.removeEventListener('timeupdate', onTimeupdateNative);
@@ -177,13 +199,17 @@ async function initializePlayer(strategy = 'proxy') {
     }
   });
 
-  art.on('video:ended', () => emit('ended'));
+  art.on('video:ended', () => {
+    if (myId !== initializePlayerDebounceId) return;
+    emit('ended');
+  });
 
   art.on('error', (error) => {
+    if (myId !== initializePlayerDebounceId) return;
     cleanupTimeout();
     if (playStrategy.value === 'proxy' && !triedDirect) {
       triedDirect = true;
-      triedProxy = false; // 避免重复
+      triedProxy = false;
       initializePlayer('direct');
       return;
     }
@@ -195,9 +221,10 @@ async function initializePlayer(strategy = 'proxy') {
     emit('error', error || new Error('视频播放失败：直连和代理均不可用。'));
   });
 
-  // 代理时10秒无playing，切直连
+  // 代理模式下超时切直连，直连超时报错
   if (strategy === 'proxy') {
     playTimeout = setTimeout(() => {
+      if (myId !== initializePlayerDebounceId) return;
       if (!hasPlayed) {
         if (!triedDirect) {
           triedDirect = true;
@@ -208,8 +235,9 @@ async function initializePlayer(strategy = 'proxy') {
         }
       }
     }, 5000);
-  } else {  // 直连8秒无playing，报错
+  } else {
     playTimeout = setTimeout(() => {
+      if (myId !== initializePlayerDebounceId) return;
       if (!hasPlayed) {
         emit('error', new Error('视频播放超时：直连不可用'));
       }
@@ -217,31 +245,10 @@ async function initializePlayer(strategy = 'proxy') {
   }
 }
 
-// 防止卡死的广告跳过逻辑：seek 后手动调用startLoad恢复播放
-function seekToNextMainTs(currentUrl, hls) {
-  const playlist = hls.levels[hls.currentLevel]?.details?.fragments || [];
-  let nextIndex = playlist.findIndex(frag => frag.url === currentUrl);
-  while (nextIndex < playlist.length - 1) {
-    nextIndex++;
-    if (playlist[nextIndex].url.startsWith(mainTsPrefix)) {
-      hls.currentTime = playlist[nextIndex].start;
-      hls.startLoad();  // 强制恢复流加载
-      if (hls.config?.debugMode) console.log('[AdBlocker] Seek to next main ts:', playlist[nextIndex].url);
-      break;
-    }
-  }
-}
-
-// playing事件
-function onPlaying() {
-  hasPlayed = true;
-  cleanupTimeout();
-}
-
-// 切集监听
+// 监听切集，防抖+彻底清理
 watch(
   () => props.episodeUrl,
-  (newUrl, oldUrl) => {
+  () => {
     triedDirect = false;
     triedProxy = false;
     nextTick(() => initializePlayer('proxy'));
@@ -276,4 +283,3 @@ onBeforeUnmount(() => {
   background-color: #000;
 }
 </style>
-
