@@ -3,14 +3,14 @@ import Hls from 'hls.js';
 const AD_KEYWORDS = [
   '/ads/', 'advertis', '//ad.', '.com/ad/', '.com/ads/', 'tracking',
   'doubleclick.net', 'googleads.g.doubleclick.net', 'googlesyndication.com',
-  'imasdk.googleapis.com', 'videoad', 'preroll', 'midroll', 'postroll', 'imasdk',
+  'imasdk.googleapis.com', 'videoad', 'preroll', 'midroll', 'postroll', 'imasdk'
 ];
-const AD_REGEX_RULES = [
+const AD_REGEX = [
   /^https?:\/\/[^\/]*?adserver\.[^\/]+\//i,
   /^https?:\/\/[^\/]*?sponsor\.[^\/]+\//i,
-  /\/advertisements\//i,
+  /\/advertisements\//i
 ];
-const AD_FRAGMENT_URL_RE = /\/(?:ad|ads|adv|preroll|gg|sponsor)[^\/]*\.ts([?#]|$)/i;
+const AD_TS_RE = /\/(?:ad|ads|adv|preroll|gg|sponsor)[^\/]*\.ts([?#]|$)/i;
 
 const VOTING_HOSTS = [
   'bfikuncdn.com',
@@ -19,7 +19,7 @@ const VOTING_HOSTS = [
 ];
 
 let weightedAdSet = new Set();
-let adTsSet = new Set();
+let votingAdSet = new Set();
 let votingActive = false;
 
 function isVotingHost(url) {
@@ -33,64 +33,60 @@ function getSecondDir(url) {
 }
 
 function isLikelyAd(url) {
-  let score = 0, lower = url.toLowerCase();
-  AD_KEYWORDS.forEach(k => lower.includes(k) && score++);
-  AD_REGEX_RULES.forEach(r => r.test(url) && score++);
-  if (AD_FRAGMENT_URL_RE.test(url)) score += 2;
+  let score = 0;
+  const l = url.toLowerCase();
+  AD_KEYWORDS.forEach(k => l.includes(k) && score++);
+  AD_REGEX.forEach(r => r.test(url) && score++);
+  if (AD_TS_RE.test(url)) score += 2;
   return score >= 2;
 }
 
 function buildWeightedAdSet(manifest) {
   weightedAdSet.clear();
   manifest.split(/\r?\n/).forEach(line => {
-    if (line.trim().endsWith('.ts') && isLikelyAd(line.trim())) {
-      weightedAdSet.add(line.trim());
-    }
+    const u = line.trim();
+    if (u.endsWith('.ts') && isLikelyAd(u)) weightedAdSet.add(u);
   });
 }
 
-function statVotingSet(manifest) {
-  const dirs = {}, lines = manifest.split(/\r?\n/).filter(l => l.trim().endsWith('.ts'));
-  adTsSet.clear();
-  lines.forEach(url => {
-    const d = getSecondDir(url);
-    if (d) dirs[d] = (dirs[d] || 0) + 1;
+function buildVotingAdSet(manifest) {
+  const counts = {};
+  votingAdSet.clear();
+  const lines = manifest.split(/\r?\n/).filter(l => l.trim().endsWith('.ts'));
+  lines.forEach(u => {
+    const d = getSecondDir(u);
+    if (d) counts[d] = (counts[d] || 0) + 1;
   });
-  let maxCount = 0, mainDir = '';
-  Object.entries(dirs).forEach(([d,c]) => { if (c > maxCount) { maxCount = c; mainDir = d; } });
-  lines.forEach(url => { if (getSecondDir(url) !== mainDir) adTsSet.add(url); });
+  let main = '', max = 0;
+  Object.entries(counts).forEach(([d,c]) => c > max && (max = c, main = d));
+  lines.forEach(u => getSecondDir(u) !== main && votingAdSet.add(u));
 }
 
-function handleManifest(manifestText, manifestUrl) {
-  votingActive = isVotingHost(manifestUrl);
-  if (votingActive) {
-    statVotingSet(manifestText);
-  } else {
-    buildWeightedAdSet(manifestText);
-  }
+function updateAdSets(manifest, url) {
+  votingActive = isVotingHost(url);
+  if (votingActive) buildVotingAdSet(manifest);
+  else buildWeightedAdSet(manifest);
 }
 
-class AdAwareLoader extends Hls.DefaultConfig.loader {
-  constructor(config) {
-    super(config);
-    this.adFilteringEnabled = !(config.p2pConfig?.adFilteringEnabled === false);
-    this.debug = config.p2pConfig?.debugMode === true;
+class AdLoader extends Hls.DefaultConfig.loader {
+  constructor(cfg) {
+    super(cfg);
+    this.enabled = cfg.p2pConfig?.adFilteringEnabled !== false;
+    this.debug = cfg.p2pConfig?.debugMode === true;
   }
-  _stripManifest(text, url) {
-    handleManifest(text, url);
-    return text;
+  _stripManifest(txt, url) {
+    updateAdSets(txt, url);
+    return txt;
   }
-  load(ctx, cfg, callbacks) {
-    if (this.adFilteringEnabled && (ctx.type === 'manifest' || ctx.type === 'level')) {
-      const orig = callbacks.onSuccess;
-      callbacks.onSuccess = (res, stats, context) => {
-        if (typeof res.data === 'string') {
-          res.data = this._stripManifest(res.data, context.url);
-        }
-        orig(res, stats, context);
+  load(ctx, cfg, cb) {
+    if (this.enabled && (ctx.type === 'manifest' || ctx.type === 'level')) {
+      const o = cb.onSuccess;
+      cb.onSuccess = (res, st, c) => {
+        if (typeof res.data === 'string') res.data = this._stripManifest(res.data, c.url);
+        o(res, st, c);
       };
     }
-    super.load(ctx, cfg, callbacks);
+    super.load(ctx, cfg, cb);
   }
 }
 
@@ -100,7 +96,7 @@ export function getHlsConfig(opts = {}) {
       adFilteringEnabled: opts.adFilteringEnabled !== false,
       debugMode: opts.debugMode === true
     },
-    loader: AdAwareLoader,
+    loader: AdLoader,
     maxBufferLength: 60,
     maxBufferSize: 100 * 1000 * 1000,
     fragLoadingMaxRetry: 4,
@@ -113,14 +109,14 @@ export function attachAdSkipLogic(hls) {
   hls.on(Hls.Events.FRAG_LOADING, (_e, data) => {
     if (skipping) return;
     const url = data.frag.url;
-    const isAd = votingActive ? adTsSet.has(url) : weightedAdSet.has(url);
+    const isAd = votingActive ? votingAdSet.has(url) : weightedAdSet.has(url);
     if (isAd) {
       skipping = true;
       const frags = hls.levels[hls.currentLevel]?.details?.fragments || [];
       let i = frags.findIndex(f => f.url === url);
       while (++i < frags.length) {
         const next = frags[i].url;
-        const ok = votingActive ? !adTsSet.has(next) : !weightedAdSet.has(next);
+        const ok = votingActive ? !votingAdSet.has(next) : !weightedAdSet.has(next);
         if (ok) {
           hls.currentTime = frags[i].start;
           hls.startLoad();
@@ -134,6 +130,6 @@ export function attachAdSkipLogic(hls) {
 
 export function resetAdDetectionState() {
   weightedAdSet.clear();
-  adTsSet.clear();
+  votingAdSet.clear();
   votingActive = false;
 }
