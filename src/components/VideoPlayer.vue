@@ -1,5 +1,5 @@
 <template>
-  <div ref="artplayerContainer" class="artplayer-container"></div>
+  <div ref="artplayerRef" class="artplayer-container"></div>
   <transition name="fade">
     <div v-if="adToast" class="ad-toast">{{ adToast }}</div>
   </transition>
@@ -14,14 +14,17 @@ import { getHlsConfig, attachAdSkipLogic, resetAdDetectionState } from '@/player
 const props = defineProps({
   option: { type: Object, required: true },
   episodeUrl: { type: String, required: true },
-  startTime: { type: Number, default: 0 },
+  startTime: { type: Number, default: 0 }
 })
 const emit = defineEmits(['timeupdate', 'ended', 'ready', 'error'])
 
-const artplayerContainer = ref(null)
+const artplayerRef = ref(null)
 let art = null
 let hls = null
 let initializeId = 0
+let hasPlayed = false
+let triedDirect = false
+let triedProxy = false
 let playTimeout = null
 
 const adToast = ref('')
@@ -37,11 +40,13 @@ function isMobile() {
   return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
 }
 
-function buildProxyUrl(url) {
-  const base = import.meta.env.VITE_NETLIFY_PROXY_URL
-  if (!base) return url
-  const enc = encodeURIComponent(url)
-  return base.endsWith('/') ? base + enc : base + '/' + enc
+function buildProxyUrl(targetUrl) {
+  const proxyBase = import.meta.env.VITE_NETLIFY_PROXY_URL
+  if (!proxyBase) return targetUrl
+  const encodedTarget = encodeURIComponent(targetUrl)
+  return proxyBase.endsWith('/')
+    ? proxyBase + encodedTarget
+    : proxyBase + '/' + encodedTarget
 }
 
 function cleanup() {
@@ -54,6 +59,7 @@ function cleanup() {
     hls.destroy()
     hls = null
   }
+  clearTimeout(toastTimer)
 }
 
 function onTimeupdate() {
@@ -61,6 +67,7 @@ function onTimeupdate() {
 }
 
 function onPlaying() {
+  hasPlayed = true
   clearTimeout(playTimeout)
 }
 
@@ -79,16 +86,18 @@ async function initializePlayer(strategy = 'proxy') {
   const id = ++initializeId
   resetAdDetectionState()
   cleanup()
-  if (!artplayerContainer.value || !props.episodeUrl) return
+  hasPlayed = false
 
-  const url = strategy === 'proxy'
+  if (!artplayerRef.value || !props.episodeUrl) return
+
+  const playUrl = strategy === 'proxy'
     ? buildProxyUrl(props.episodeUrl)
     : props.episodeUrl
 
-  const options = {
+  const playerOptions = {
     ...props.option,
-    container: artplayerContainer.value,
-    url,
+    container: artplayerRef.value,
+    url: playUrl,
     autoMini: false,
     playbackRate: true,
     setting: true,
@@ -116,7 +125,7 @@ async function initializePlayer(strategy = 'proxy') {
     },
   }
 
-  art = new Artplayer(options)
+  art = new Artplayer(playerOptions)
 
   art.on('fullscreen', isFull => {
     if (id !== initializeId) return
@@ -146,20 +155,43 @@ async function initializePlayer(strategy = 'proxy') {
   art.on('error', err => {
     if (id !== initializeId) return
     clearTimeout(playTimeout)
-    if (strategy === 'proxy') {
+    // 只在真正播放失败或超时后才切换代理/直连
+    if (strategy === 'proxy' && !triedDirect) {
+      triedDirect = true
+      triedProxy = false
       initializePlayer('direct')
-    } else {
-      emit('error', err || new Error('播放失败'))
+      return
     }
+    if (strategy === 'direct' && !triedProxy) {
+      triedProxy = true
+      triedDirect = false
+      initializePlayer('proxy')
+      return
+    }
+    emit('error', err || new Error('播放失败'))
   })
 
   playTimeout = setTimeout(() => {
-    if (id !== initializeId) return
+    if (id !== initializeId || hasPlayed) return
+    if (strategy === 'proxy' && !triedDirect) {
+      triedDirect = true
+      triedProxy = false
+      initializePlayer('direct')
+      return
+    }
+    if (strategy === 'direct' && !triedProxy) {
+      triedProxy = true
+      triedDirect = false
+      initializePlayer('proxy')
+      return
+    }
     emit('error', new Error('播放超时'))
-  }, 8000)
+  }, strategy === 'proxy' ? 6000 : 6000)
 }
 
 watch(() => props.episodeUrl, () => {
+  triedDirect = false
+  triedProxy = false
   nextTick(() => initializePlayer('proxy'))
 })
 
@@ -173,20 +205,14 @@ onMounted(() => initializePlayer('proxy'))
 onBeforeUnmount(() => {
   cleanup()
   unlockOrientation()
-  clearTimeout(toastTimer)
 })
 
-/** 包装跳播事件，用户有广告时toast提示 */
 function attachAdSkipLogicWithToast(hls, showAdToast) {
   let skipCount = 0
   const SKIP_MAX = 10
   hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => {
     const url = data.frag.url
-    // 下面两行与 player.js 保持一致
-    const voting = hls.config.p2pConfig?.votingActive
-    const weightedAdSet = hls.config.p2pConfig?.weightedAdSet
-    const votingAdSet = hls.config.p2pConfig?.votingAdSet
-    // 兼容player.js中的全局变量
+    // 全局变量方案和 player.js 保持一致
     let isAd = false
     if (typeof window !== 'undefined') {
       isAd = window.votingActive
@@ -221,17 +247,16 @@ function attachAdSkipLogicWithToast(hls, showAdToast) {
 <style scoped>
 .artplayer-container {
   width: 100%;
-  aspect-ratio: 16/9;
+  height: 500px;
   background-color: #000;
   position: relative;
 }
-
 .ad-toast {
   position: absolute;
   top: 40px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(24,24,24,0.9);
+  background: rgba(24,24,24,0.92);
   color: #ffe066;
   padding: 8px 24px;
   font-size: 15px;
