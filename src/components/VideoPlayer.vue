@@ -1,5 +1,9 @@
 <template>
-  <div ref="artplayerRef" class="artplayer-container"></div>
+  <div ref="artplayerRef" class="artplayer-container">
+    <div v-if="blackMask" class="black-mask-tip">
+      <div class="black-mask-text">正在跳过广告</div>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -16,7 +20,7 @@ const props = defineProps({
 const emit = defineEmits(["timeupdate", "ended", "ready", "error"]);
 
 const artplayerRef = ref(null);
-
+const blackMask = ref(false);
 let art = null;
 let hls = null;
 let initializeId = 0;
@@ -24,7 +28,9 @@ let hasPlayed = false;
 let triedDirect = false;
 let triedProxy = false;
 let playTimeout = null;
-let skipLock = false; // 跳播锁，防止死循环
+
+// 记录正片 duration
+let mainDuration = 0;
 
 function buildProxyUrl(targetUrl) {
   const proxyBase = import.meta.env.VITE_NETLIFY_PROXY_URL;
@@ -42,11 +48,26 @@ function cleanup() {
     hls.destroy();
     hls = null;
   }
-  skipLock = false;
+  blackMask.value = false;
+  hasPlayed = false;
+  mainDuration = 0;
 }
 
 function onTimeupdate() {
-  if (art) emit("timeupdate", { time: art.currentTime, duration: art.duration });
+  if (!art) return;
+  emit("timeupdate", { time: art.currentTime, duration: art.duration });
+
+  // 只在正片最后两秒黑屏（不在广告片段）
+  if (
+    mainDuration > 1 &&
+    art.currentTime >= mainDuration - 1 &&
+    art.currentTime <= mainDuration &&
+    !isAdFragmentTs(currentFragUrl)
+  ) {
+    blackMask.value = true;
+  } else {
+    blackMask.value = false;
+  }
 }
 
 function onPlaying() {
@@ -54,32 +75,23 @@ function onPlaying() {
   clearTimeout(playTimeout);
 }
 
-// 自动 Seek 跳过广告
-function attachAdSeekLogic(hls, art) {
-  hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => {
-    if (!art || !art.video) return;
-    const fragUrl = data.frag.url;
-    const isAd = isAdFragmentTs(fragUrl);
+// 当前片段 url（用于判断是不是广告片段）
+let currentFragUrl = "";
 
-    if (isAd && !skipLock) {
-      const fragments =
-        hls.levels[hls.currentLevel]?.details?.fragments || [];
-      let curIdx = fragments.findIndex((frag) => frag.url === fragUrl);
-      let nextIdx = curIdx;
-      // 向后找到第一个非广告片段
-      while (nextIdx < fragments.length - 1) {
-        nextIdx++;
-        const nextUrl = fragments[nextIdx].url;
-        if (!isAdFragmentTs(nextUrl)) {
-          // 跳到下一个正片
-          skipLock = true; // 跳播中，加锁
-          hls.currentTime = fragments[nextIdx].start;
-          setTimeout(() => {
-            skipLock = false; // 跳播结束，解锁
-          }, 800); // 防止多次跳播
-          break;
-        }
-      }
+function attachAdPlaybackControl(hls, art) {
+  let lastState = null;
+  hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => {
+    currentFragUrl = data.frag.url;
+    const isAd = isAdFragmentTs(currentFragUrl);
+    if (!art || !art.video) return;
+    if (isAd && lastState !== "ad") {
+      art.video.playbackRate = 6.0;
+      art.video.muted = true;
+      lastState = "ad";
+    } else if (!isAd && lastState !== "normal") {
+      art.video.playbackRate = 1.0;
+      art.video.muted = false;
+      lastState = "normal";
     }
   });
 }
@@ -87,7 +99,6 @@ function attachAdSeekLogic(hls, art) {
 async function initializePlayer(strategy = "proxy") {
   const id = ++initializeId;
   cleanup();
-  hasPlayed = false;
 
   if (!artplayerRef.value) return;
 
@@ -114,7 +125,7 @@ async function initializePlayer(strategy = "proxy") {
           hls.loadSource(src);
           hls.attachMedia(video);
           player.hls = hls;
-          attachAdSeekLogic(hls, player);
+          attachAdPlaybackControl(hls, player);
           player.on("destroy", () => hls && hls.destroy());
         } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
           video.src = src;
@@ -137,12 +148,16 @@ async function initializePlayer(strategy = "proxy") {
         }
       }, 500);
     }
+    mainDuration = art.duration || 0;
     art.video?.addEventListener("timeupdate", onTimeupdate);
     art.video?.addEventListener("playing", onPlaying);
     emit("ready", art);
   });
 
-  art.on("video:ended", () => emit("ended"));
+  art.on("video:ended", () => {
+    blackMask.value = false;
+    emit("ended");
+  });
 
   art.on("error", err => {
     clearTimeout(playTimeout);
@@ -195,5 +210,22 @@ onBeforeUnmount(() => cleanup());
   position: relative;
   transition: background 0.2s;
   overflow: hidden;
+}
+.black-mask-tip {
+  position: absolute;
+  inset: 0;
+  z-index: 99999;
+  background: #000 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.black-mask-text {
+  color: #fff;
+  font-size: 32px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  text-shadow: 0 2px 12px #111;
+  user-select: none;
 }
 </style>
