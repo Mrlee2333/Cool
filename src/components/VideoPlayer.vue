@@ -1,19 +1,14 @@
 <template>
-  <div
-    ref="artplayerRef"
-    class="artplayer-container"
-    :class="{
-      'ad-bg-mobile': adMask && isMobile,
-      'ad-bg-pc': adMask && !isMobile
-    }"
-  >
-    <div v-if="adMask" class="ad-mask-absolute">
+  <div ref="artplayerRef" class="artplayer-container"
+       :style="adMask ? {background: '#fff'} : {}">
+    <div v-if="adMask" class="global-ad-mask">
       <img
-        :class="isMobile ? 'ad-image-mobile' : 'ad-image-pc'"
+        class="ad-image-final"
         src="https://testingcf.jsdelivr.net/gh/macklee6/hahah/ok.gif"
-        alt="广告中..."
+        alt="广告中"
+        draggable="false"
       />
-      <div class="ad-text">正在跳过广告</div>
+      <div class="ad-text-final">正在跳过广告</div>
     </div>
   </div>
 </template>
@@ -70,7 +65,6 @@ function onPlaying() {
   clearTimeout(playTimeout);
 }
 
-// 核心：广告倍速+静音+遮罩控制
 function attachAdPlaybackControl(hls, art) {
   let lastState = null;
   hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => {
@@ -95,6 +89,8 @@ async function initializePlayer(strategy = "proxy") {
   const id = ++initializeId;
   cleanup();
   hasPlayed = false;
+
+  if (!artplayerRef.value) return;
 
   const playUrl =
     strategy === "proxy"
@@ -196,17 +192,19 @@ onBeforeUnmount(() => cleanup());
 .artplayer-container {
   width: 100%;
   height: 500px;
-  background-color: #000;
+  background: #000;
   position: relative;
   transition: background 0.2s;
+  overflow: hidden;
 }
+
 .ad-bg-mobile,
 .ad-bg-pc {
   background: #fff !important;
   transition: background 0.2s;
 }
 
-.ad-mask-absolute {
+.global-ad-mask {
   position: absolute;
   inset: 0;
   display: flex;
@@ -214,13 +212,16 @@ onBeforeUnmount(() => cleanup());
   justify-content: center;
   align-items: center;
   pointer-events: none;
-  z-index: 999;
-  background: transparent;
+  z-index: 99999;
+  background: rgba(255,255,255,0.02);
 }
-.ad-image-mobile {
+
+.ad-image-final {
   width: 88px;
   height: 88px;
-  border-radius: 44px;
+  max-width: 180px;
+  max-height: 180px;
+  border-radius: 50%;
   margin-bottom: 18px;
   user-select: none;
   pointer-events: none;
@@ -228,27 +229,16 @@ onBeforeUnmount(() => cleanup());
   box-shadow: 0 0 18px #ffe066bb;
   background: rgba(255,255,255,0.09);
 }
-.ad-image-pc {
-  max-width: 60%;
-  max-height: 70%;
-  border-radius: 18px;
-  margin-bottom: 22px;
-  user-select: none;
-  pointer-events: none;
-  object-fit: contain;
-  box-shadow: 0 0 20px #ffe066bb;
-  background: rgba(255,255,255,0.09);
-}
-.ad-text {
+.ad-text-final {
   color: #222;
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: 1.5px;
+  font-size: 23px;
+  font-weight: 700;
+  letter-spacing: 2px;
   text-shadow: 0 2px 12px #fff9, 0 1px 0 #fff;
-  background: rgba(255,255,255,0.85);
-  border-radius: 9px;
-  padding: 8px 24px 8px 24px;
-  margin-top: 5px;
+  background: rgba(255,255,255,0.93);
+  border-radius: 12px;
+  padding: 10px 28px 10px 28px;
+  margin-top: 6px;
   box-shadow: 0 0 2px #fff7;
   user-select: none;
 }
