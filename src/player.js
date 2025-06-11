@@ -1,6 +1,5 @@
 import Hls from 'hls.js';
 
-// ========== 广告特征常量 ==========
 const AD_KEYWORDS = [
   '/ads/', 'advertis', '//ad.', '.com/ad/', '.com/ads/', 'tracking',
   'doubleclick.net', 'googleads.g.doubleclick.net', 'googlesyndication.com',
@@ -13,40 +12,36 @@ const AD_REGEX_RULES = [
 ];
 const AD_FRAGMENT_URL_RE = /\/(?:ad|ads|adv|preroll|gg|sponsor)[^\/]*\.ts([?#]|$)/i;
 
-// ========== 特定投票法网站 ==========
 const VOTING_HOSTS = [
   'bfikuncdn.com',
   'kkzycdn.com:65',
   'vod.360zyx.vip'
 ];
 
-// ========== 全局状态 ==========
-let weightedAdSet = new Set();         // 加权法：广告片段url集合
-let useWeightedFallback = false;       // 当前是否启用加权法
-let checkedSample = false;             // 是否已采样过
+let weightedAdSet = new Set();
+let useWeightedFallback = false;
+let checkedSample = false;
 
-let votingActive = false;              // 当前是否特定网站
-let mainDirStat = {};                  // 目录统计
-let mainSecondDir = '';                // 正片目录（投票法）
-let adTsSet = new Set();               // 投票法：广告片段url集合
+let votingActive = false;
+let mainDirStat = {};
+let mainSecondDir = '';
+let adTsSet = new Set();
 
-let skipHistorySet = new Set();        // 跳播循环保护
-let skipLoopLimit = 10;                // 连续最多跳过N片段
+let skipHistorySet = new Set();
+let skipLoopLimit = 10;
 
-// ========== 工具函数 ==========
+let forceFilterManifest = false;
 
 function isVotingHost(manifestUrl) {
   return VOTING_HOSTS.some(host => manifestUrl.includes(host));
 }
 
-// 获取二级目录，如/20250608/VYJLSmhJ/
 function getSecondDir(url) {
   const u = url.split('?')[0].split('#')[0];
   const match = u.match(/^https?:\/\/[^/]+(\/[^/]+\/[^/]+)\//);
   return match ? match[1] : '';
 }
 
-// ========== 加权判定相关 ==========
 function isLikelyAd(url) {
   let adScore = 0;
   const lowerUrl = url.toLowerCase();
@@ -68,23 +63,18 @@ function buildWeightedAdSet(manifestText) {
   }
 }
 
-// ========== 目录投票法相关 ==========
 function statTsDirAndAdSet(manifestText, manifestUrl) {
   mainDirStat = {};
   adTsSet.clear();
   mainSecondDir = '';
   checkedSample = true;
-
   const tsLines = manifestText.split(/\r?\n/).filter(line => line.trim().endsWith('.ts'));
   if (tsLines.length < 1) return;
-
-  // 统计所有二级目录
   for (const tsUrl of tsLines) {
     const dir = getSecondDir(tsUrl);
     if (!dir) continue;
     mainDirStat[dir] = (mainDirStat[dir] || 0) + 1;
   }
-  // 找出现最多的目录
   let max = 0;
   for (const dir in mainDirStat) {
     if (mainDirStat[dir] > max) {
@@ -92,65 +82,52 @@ function statTsDirAndAdSet(manifestText, manifestUrl) {
       mainSecondDir = dir;
     }
   }
-
-  // 标记广告片段（不是正片目录的 ts）
   for (const tsUrl of tsLines) {
     if (getSecondDir(tsUrl) !== mainSecondDir) {
       adTsSet.add(tsUrl);
     }
   }
-
-  // 输出统计
-  if (adTsSet.size) {
-    console.log('[AdBlocker][目录投票统计]', mainDirStat);
-    console.log('[AdBlocker][广告片段]', Array.from(adTsSet));
-  }
 }
 
-// ========== 采样主入口 ==========
 function handleManifestSampling(manifestText, manifestUrl) {
   checkedSample = true;
   votingActive = isVotingHost(manifestUrl);
-
   if (votingActive) {
-    // 投票法
     statTsDirAndAdSet(manifestText, manifestUrl);
     useWeightedFallback = false;
   } else {
-    // 加权法
     buildWeightedAdSet(manifestText);
     useWeightedFallback = true;
   }
 }
 
-// ========== 跳过广告片段逻辑 ==========
+function filterManifestAds(manifestText, manifestUrl) {
+  if (!votingActive && !useWeightedFallback) return manifestText;
+  const lines = manifestText.split(/\r?\n/);
+  return lines.filter(line => {
+    if (!line.trim().endsWith('.ts')) return true;
+    if (votingActive && adTsSet.has(line.trim())) return false;
+    if (useWeightedFallback && weightedAdSet.has(line.trim())) return false;
+    return true;
+  }).join('\n');
+}
+
 function skipIfAd(currentUrl, hls) {
-  // 循环保护
   if (skipHistorySet.has(currentUrl)) {
-    if (skipHistorySet.size > skipLoopLimit) {
-      hls.config?.debugMode && console.error('[AdBlocker] 跳播循环, 停止跳播！');
-      return;
-    }
+    if (skipHistorySet.size > skipLoopLimit) return;
   }
   skipHistorySet.add(currentUrl);
-
-  // 投票法（只对特定网站生效）
   if (votingActive && adTsSet.size && adTsSet.has(currentUrl)) {
     seekToNextNormalTs(currentUrl, hls);
     return;
   }
-
-  // 加权法
   if (useWeightedFallback && weightedAdSet.has(currentUrl)) {
     seekToNextNonAd(currentUrl, hls);
     return;
   }
-
-  // 不是广告
   skipHistorySet.clear();
 }
 
-// 跳到下一个正常片段
 function seekToNextNormalTs(currentUrl, hls) {
   const playlist = hls.levels[hls.currentLevel]?.details?.fragments || [];
   let nextIndex = playlist.findIndex(frag => frag.url === currentUrl);
@@ -160,13 +137,11 @@ function seekToNextNormalTs(currentUrl, hls) {
     if (!adTsSet.has(playlist[nextIndex].url)) {
       hls.currentTime = playlist[nextIndex].start;
       hls.startLoad?.();
-      hls.config?.debugMode && console.log('[AdBlocker] Seek to next normal ts:', playlist[nextIndex].url);
       break;
     }
   }
 }
 
-// 跳到下一个非广告片段（加权法）
 function seekToNextNonAd(currentUrl, hls) {
   const playlist = hls.levels[hls.currentLevel]?.details?.fragments || [];
   let nextIndex = playlist.findIndex(frag => frag.url === currentUrl);
@@ -176,16 +151,13 @@ function seekToNextNonAd(currentUrl, hls) {
     if (!weightedAdSet.has(playlist[nextIndex].url)) {
       hls.currentTime = playlist[nextIndex].start;
       hls.startLoad?.();
-      hls.config?.debugMode && console.log('[AdBlocker] Seek to next non-ad ts:', playlist[nextIndex].url);
       break;
     }
   }
 }
 
-// ========== Loader类实现 ==========
 class AdAwareLoader extends Hls.DefaultConfig.loader {
   static _alreadyInitLog = false;
-
   constructor(config) {
     super(config);
     const customConfig = config.p2pConfig || {};
@@ -197,13 +169,12 @@ class AdAwareLoader extends Hls.DefaultConfig.loader {
       AdAwareLoader._alreadyInitLog = true;
     }
   }
-
   _stripManifest(manifestText, manifestUrl) {
     if (!this.adFilteringEnabled) return manifestText;
+    if (forceFilterManifest) return filterManifestAds(manifestText, manifestUrl);
     handleManifestSampling(manifestText, manifestUrl);
     return manifestText;
   }
-
   load(context, config, callbacks) {
     const { type, url } = context;
     if (this.adFilteringEnabled && (type === "manifest" || type === "level")) {
@@ -219,7 +190,6 @@ class AdAwareLoader extends Hls.DefaultConfig.loader {
   }
 }
 
-// ========== HLS.js配置 ==========
 export function getHlsConfig(options = {}) {
   return {
     p2pConfig: {
@@ -234,24 +204,56 @@ export function getHlsConfig(options = {}) {
   };
 }
 
-// ========== 绑定播放器事件 ==========
 export function attachAdSkipLogic(hls) {
+  let adFrameDetected = false;
+  hls.on(Hls.Events.FRAG_LOADING, function (event, data) {
+    const fragUrl = data?.frag?.url;
+    if (!fragUrl) return;
+    if (
+      (votingActive && adTsSet.size && adTsSet.has(fragUrl)) ||
+      (useWeightedFallback && weightedAdSet.has(fragUrl))
+    ) {
+      adFrameDetected = true;
+      const playlist = hls.levels[hls.currentLevel]?.details?.fragments || [];
+      let nextIndex = playlist.findIndex(frag => frag.url === fragUrl);
+      let count = 0;
+      while (nextIndex < playlist.length - 1 && count < skipLoopLimit) {
+        nextIndex++; count++;
+        const nextUrl = playlist[nextIndex].url;
+        if (
+          (votingActive && (!adTsSet.has(nextUrl))) ||
+          (useWeightedFallback && !weightedAdSet.has(nextUrl))
+        ) {
+          hls.currentTime = playlist[nextIndex].start;
+          hls.startLoad?.();
+          break;
+        }
+      }
+    }
+  });
   hls.on(Hls.Events.FRAG_CHANGED, function (event, data) {
     const fragUrl = data.frag.url;
     skipIfAd(fragUrl, hls);
+    if (
+      ((votingActive && adTsSet.size && adTsSet.has(fragUrl)) ||
+      (useWeightedFallback && weightedAdSet.has(fragUrl)))
+      && adFrameDetected
+    ) {
+      forceFilterManifest = true;
+      hls.config?.debugMode && console.log('[AdBlocker] Detected ad after FRAG_LOADING skip, switching to manifest filtering!');
+    }
+    adFrameDetected = false;
   });
 }
 
-// ========== 重置全局状态 ==========
 export function resetAdDetectionState() {
   weightedAdSet.clear();
   checkedSample = false;
   useWeightedFallback = false;
-
   votingActive = false;
   mainDirStat = {};
   mainSecondDir = '';
   adTsSet.clear();
-
   skipHistorySet.clear();
+  forceFilterManifest = false;
 }
