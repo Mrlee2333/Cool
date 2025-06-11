@@ -24,7 +24,7 @@ let hasPlayed = false;
 let triedDirect = false;
 let triedProxy = false;
 let playTimeout = null;
-let userPausedByAd = false; // 标记广告暂停的状态
+let skipLock = false; // 跳播锁，防止死循环
 
 function buildProxyUrl(targetUrl) {
   const proxyBase = import.meta.env.VITE_NETLIFY_PROXY_URL;
@@ -42,7 +42,7 @@ function cleanup() {
     hls.destroy();
     hls = null;
   }
-  userPausedByAd = false;
+  skipLock = false;
 }
 
 function onTimeupdate() {
@@ -54,27 +54,32 @@ function onPlaying() {
   clearTimeout(playTimeout);
 }
 
-// 广告暂停，正片恢复
-function attachAdPauseControl(hls, art) {
-  let lastWasAd = false;
+// 自动 Seek 跳过广告
+function attachAdSeekLogic(hls, art) {
   hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => {
+    if (!art || !art.video) return;
     const fragUrl = data.frag.url;
     const isAd = isAdFragmentTs(fragUrl);
-    if (!art || !art.video) return;
 
-    if (isAd) {
-      if (!art.video.paused) {
-        art.video.pause();
-        userPausedByAd = true;
+    if (isAd && !skipLock) {
+      const fragments =
+        hls.levels[hls.currentLevel]?.details?.fragments || [];
+      let curIdx = fragments.findIndex((frag) => frag.url === fragUrl);
+      let nextIdx = curIdx;
+      // 向后找到第一个非广告片段
+      while (nextIdx < fragments.length - 1) {
+        nextIdx++;
+        const nextUrl = fragments[nextIdx].url;
+        if (!isAdFragmentTs(nextUrl)) {
+          // 跳到下一个正片
+          skipLock = true; // 跳播中，加锁
+          hls.currentTime = fragments[nextIdx].start;
+          setTimeout(() => {
+            skipLock = false; // 跳播结束，解锁
+          }, 800); // 防止多次跳播
+          break;
+        }
       }
-      lastWasAd = true;
-    } else {
-      // 只有广告期间暂停过，遇到正片才自动恢复
-      if (lastWasAd && userPausedByAd) {
-        art.video.play();
-        userPausedByAd = false;
-      }
-      lastWasAd = false;
     }
   });
 }
@@ -109,7 +114,7 @@ async function initializePlayer(strategy = "proxy") {
           hls.loadSource(src);
           hls.attachMedia(video);
           player.hls = hls;
-          attachAdPauseControl(hls, player);
+          attachAdSeekLogic(hls, player);
           player.on("destroy", () => hls && hls.destroy());
         } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
           video.src = src;
