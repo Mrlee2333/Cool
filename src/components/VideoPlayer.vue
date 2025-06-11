@@ -82,7 +82,7 @@ function attachAdPlaybackControl(hls, art) {
     const isAd = isAdFragmentTs(fragUrl);
     if (!art || !art.video) return;
     if (isAd && lastState !== "ad") {
-      art.video.playbackRate = 4.0;  // 4倍速
+      art.video.playbackRate = 9.0;
       art.video.muted = true;
       lastState = "ad";
     } else if (!isAd && lastState !== "normal") {
