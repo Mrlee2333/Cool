@@ -22,7 +22,7 @@
 
 ---
 
-## 🛑 免责声明 / Disclaimer
+## 🚨 免责声明 / Disclaimer
 
 免责声明：
 
