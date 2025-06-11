@@ -30,8 +30,6 @@ let adTsSet = new Set();
 let skipHistorySet = new Set();
 let skipLoopLimit = 10;
 
-let forceFilterManifest = false;
-
 function isVotingHost(manifestUrl) {
   return VOTING_HOSTS.some(host => manifestUrl.includes(host));
 }
@@ -101,22 +99,15 @@ function handleManifestSampling(manifestText, manifestUrl) {
   }
 }
 
-function filterManifestAds(manifestText, manifestUrl) {
-  if (!votingActive && !useWeightedFallback) return manifestText;
-  const lines = manifestText.split(/\r?\n/);
-  return lines.filter(line => {
-    if (!line.trim().endsWith('.ts')) return true;
-    if (votingActive && adTsSet.has(line.trim())) return false;
-    if (useWeightedFallback && weightedAdSet.has(line.trim())) return false;
-    return true;
-  }).join('\n');
-}
-
 function skipIfAd(currentUrl, hls) {
   if (skipHistorySet.has(currentUrl)) {
-    if (skipHistorySet.size > skipLoopLimit) return;
+    if (skipHistorySet.size > skipLoopLimit) {
+      if (hls.config?.debugMode) console.error('[AdBlocker] 循环跳播，停止。');
+      return;
+    }
   }
   skipHistorySet.add(currentUrl);
+
   if (votingActive && adTsSet.size && adTsSet.has(currentUrl)) {
     seekToNextNormalTs(currentUrl, hls);
     return;
@@ -171,7 +162,6 @@ class AdAwareLoader extends Hls.DefaultConfig.loader {
   }
   _stripManifest(manifestText, manifestUrl) {
     if (!this.adFilteringEnabled) return manifestText;
-    if (forceFilterManifest) return filterManifestAds(manifestText, manifestUrl);
     handleManifestSampling(manifestText, manifestUrl);
     return manifestText;
   }
@@ -205,7 +195,6 @@ export function getHlsConfig(options = {}) {
 }
 
 export function attachAdSkipLogic(hls) {
-  let adFrameDetected = false;
   hls.on(Hls.Events.FRAG_LOADING, function (event, data) {
     const fragUrl = data?.frag?.url;
     if (!fragUrl) return;
@@ -213,7 +202,6 @@ export function attachAdSkipLogic(hls) {
       (votingActive && adTsSet.size && adTsSet.has(fragUrl)) ||
       (useWeightedFallback && weightedAdSet.has(fragUrl))
     ) {
-      adFrameDetected = true;
       const playlist = hls.levels[hls.currentLevel]?.details?.fragments || [];
       let nextIndex = playlist.findIndex(frag => frag.url === fragUrl);
       let count = 0;
@@ -234,15 +222,10 @@ export function attachAdSkipLogic(hls) {
   hls.on(Hls.Events.FRAG_CHANGED, function (event, data) {
     const fragUrl = data.frag.url;
     skipIfAd(fragUrl, hls);
-    if (
-      ((votingActive && adTsSet.size && adTsSet.has(fragUrl)) ||
-      (useWeightedFallback && weightedAdSet.has(fragUrl)))
-      && adFrameDetected
-    ) {
-      forceFilterManifest = true;
-      hls.config?.debugMode && console.log('[AdBlocker] Detected ad after FRAG_LOADING skip, switching to manifest filtering!');
-    }
-    adFrameDetected = false;
+  });
+  hls.on(Hls.Events.FRAG_BUFFERED, function (event, data) {
+    const fragUrl = data.frag.url;
+    skipIfAd(fragUrl, hls);
   });
 }
 
@@ -255,5 +238,4 @@ export function resetAdDetectionState() {
   mainSecondDir = '';
   adTsSet.clear();
   skipHistorySet.clear();
-  forceFilterManifest = false;
 }
