@@ -20,12 +20,16 @@ const SPECIAL_HOSTS = [
   'vod.360zyx.vip'
 ];
 
-let mainTsPrefix = '';         // 正片前缀（自动采样得到）
+// ================== 全局状态 ==================
+let mainTsPrefix = '';         // 正片前缀（默认通用方式）
+let mainSecondDir = '';        // 特殊host下“正片二级目录”
+let specialHostActive = false; // 是否启用特殊host模式
 let checkedSample = false;     // 是否已采样过
 let adCount = 0;               // 统计广告片段
 let useWeightedFallback = false; // 是否启用加权判定
 let weightedAdSet = new Set();   // 加权判定出的广告ts列表
 
+// 跳播循环保护
 let skipHistorySet = new Set();
 let skipLoopLimit = 5;
 
@@ -36,6 +40,15 @@ function getTsPrefix(url) {
   const pureUrl = url.split('?')[0].split('#')[0];
   const match = pureUrl.match(/^(.*\/)[^/]+\.ts/);
   return match ? match[1] : null;
+}
+
+// 二级目录，如 /20250608/VYJLSmhJ/
+function getSecondDir(url) {
+  // 去除参数
+  const u = url.split('?')[0].split('#')[0];
+  // 匹配 https://host/dir1/dir2/
+  const match = u.match(/^https?:\/\/[^/]+(\/[^/]+\/[^/]+)\//);
+  return match ? match[1] : '';
 }
 
 // 均匀分布取3个采样点
@@ -50,33 +63,35 @@ function isSpecialHost(manifestUrl) {
   return SPECIAL_HOSTS.some(host => manifestUrl.includes(host));
 }
 
-// ================== 主前缀采样逻辑 ==================
+// ================== 主前缀/目录采样逻辑 ==================
 
-// 特殊host始终用第3个ts采样
+// 主入口，兼容特殊host与通用逻辑
 function sampleMainTsPrefix(manifestText, manifestUrl) {
   checkedSample = true;
   const tsLines = manifestText.split(/\r?\n/).filter(line => line.trim().endsWith('.ts'));
   if (tsLines.length < 1) return;
 
-  let prefix;
   if (isSpecialHost(manifestUrl)) {
-    // 取第3个(索引2)，不足3个时用第1个
+    specialHostActive = true;
+    // 取第3个（不足3个取第1个），记录其二级目录
     const idx = tsLines.length > 2 ? 2 : 0;
-    prefix = getTsPrefix(tsLines[idx]);
+    mainSecondDir = getSecondDir(tsLines[idx]);
+    mainTsPrefix = '';
+    useWeightedFallback = false;
   } else {
-    // 默认采样
+    specialHostActive = false;
+    mainSecondDir = '';
+    // 默认前缀采样
     const idxs = randomSampleIndexes(tsLines.length);
     const prefixes = idxs.map(idx => getTsPrefix(tsLines[idx]));
     // 取出现最多的前缀为主前缀
     const freq = {};
     prefixes.forEach(pre => { if (pre) freq[pre] = (freq[pre] || 0) + 1; });
-    prefix = Object.keys(freq).reduce((a, b) => freq[a] > freq[b] ? a : b, '');
+    mainTsPrefix = Object.keys(freq).reduce((a, b) => freq[a] > freq[b] ? a : b, '');
     // 如果采样到的都不一样，启用加权
-    if (!prefix || freq[prefix] === 1) useWeightedFallback = true;
+    if (!mainTsPrefix || freq[mainTsPrefix] === 1) useWeightedFallback = true;
+    else useWeightedFallback = false;
   }
-  mainTsPrefix = prefix || '';
-  // 特殊host下始终不启用加权
-  if (isSpecialHost(manifestUrl)) useWeightedFallback = false;
 }
 
 // 加权广告判定
@@ -110,10 +125,18 @@ function handleManifestSampling(manifestText, manifestUrl) {
   }
 }
 
+// ================== 特殊host广告判定 ==================
+
+// 判断特殊host广告（目录不同即广告）
+function isSpecialHostAdTs(tsUrl) {
+  if (!mainSecondDir) return false;
+  return getSecondDir(tsUrl) !== mainSecondDir;
+}
+
 // ================== 跳过广告片段逻辑 ==================
 
 function skipIfAd(currentUrl, hls) {
-
+  // 循环保护
   if (skipHistorySet.has(currentUrl)) {
     if (skipHistorySet.size > skipLoopLimit) {
       hls.config?.debugMode && console.error('[AdBlocker] 跳播循环, 停止跳播！');
@@ -122,12 +145,23 @@ function skipIfAd(currentUrl, hls) {
   }
   skipHistorySet.add(currentUrl);
 
+  // 特殊host
+  if (specialHostActive && mainSecondDir) {
+    if (isSpecialHostAdTs(currentUrl)) {
+      seekToNextSpecialHostTs(currentUrl, hls);
+      return;
+    } else {
+      skipHistorySet.clear();
+      return;
+    }
+  }
+
+  // 通用host
   if (mainTsPrefix && !useWeightedFallback) {
-    // 只要不是主前缀就是广告
     if (!currentUrl.startsWith(mainTsPrefix)) {
       seekToNextMainTs(currentUrl, hls);
     } else {
-      skipHistorySet.clear(); 
+      skipHistorySet.clear();
     }
   } else if (useWeightedFallback && weightedAdSet.has(currentUrl)) {
     seekToNextNonAd(currentUrl, hls);
@@ -136,7 +170,22 @@ function skipIfAd(currentUrl, hls) {
   }
 }
 
-// seek 到下一个主前缀 ts
+// 特殊host，跳到下一个同二级目录的正片ts
+function seekToNextSpecialHostTs(currentUrl, hls) {
+  const playlist = hls.levels[hls.currentLevel]?.details?.fragments || [];
+  let nextIndex = playlist.findIndex(frag => frag.url === currentUrl);
+  while (nextIndex < playlist.length - 1) {
+    nextIndex++;
+    if (!isSpecialHostAdTs(playlist[nextIndex].url)) {
+      hls.currentTime = playlist[nextIndex].start;
+      hls.startLoad?.();
+      if (hls.config?.debugMode) console.log('[AdBlocker] Seek to next main ts:', playlist[nextIndex].url);
+      break;
+    }
+  }
+}
+
+// 通用前缀跳播
 function seekToNextMainTs(currentUrl, hls) {
   const playlist = hls.levels[hls.currentLevel]?.details?.fragments || [];
   let nextIndex = playlist.findIndex(frag => frag.url === currentUrl);
@@ -151,7 +200,7 @@ function seekToNextMainTs(currentUrl, hls) {
   }
 }
 
-// seek 到下一个非广告 ts
+// 加权跳播
 function seekToNextNonAd(currentUrl, hls) {
   const playlist = hls.levels[hls.currentLevel]?.details?.fragments || [];
   let nextIndex = playlist.findIndex(frag => frag.url === currentUrl);
@@ -239,4 +288,6 @@ export function resetAdDetectionState() {
   useWeightedFallback = false;
   weightedAdSet.clear();
   skipHistorySet.clear();
+  mainSecondDir = '';
+  specialHostActive = false;
 }
