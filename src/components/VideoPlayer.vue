@@ -6,7 +6,7 @@
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from "vue";
 import Artplayer from "artplayer";
 import Hls from "hls.js";
-import { getHlsConfig, attachAdSkipLogic } from "@/player.js"; // 移除了resetAdDetectionState
+import { getHlsConfig } from "@/player.js"; // 仅保留 getHlsConfig
 
 const props = defineProps({
   option: { type: Object, required: true },
@@ -104,7 +104,6 @@ async function initializePlayer(strategy = "proxy") {
           hls = new Hls(getHlsConfig({ adFilteringEnabled: true, debugMode: true }));
           hls.loadSource(src);
           hls.attachMedia(video);
-          attachAdSkipLogic(hls);
           player.hls = hls;
           player.on("destroy", () => hls && hls.destroy());
         } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
