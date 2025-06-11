@@ -101,7 +101,7 @@ async function initializePlayer(strategy = "proxy") {
       m3u8(video, src, player) {
         if (Hls.isSupported()) {
           if (player.hls) player.hls.destroy();
-          hls = new Hls(getHlsConfig({ adFilteringEnabled: true, debugMode: true }));
+          hls = new Hls(getHlsConfig({ adFilteringEnabled: true, debugMode: false }));
           hls.loadSource(src);
           hls.attachMedia(video);
           player.hls = hls;
