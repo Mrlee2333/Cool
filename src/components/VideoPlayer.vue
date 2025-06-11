@@ -1,22 +1,5 @@
 <template>
-  <div ref="artplayerRef" class="artplayer-container"
-    :class="{
-      'ad-bg': adMask
-    }">
-    <!-- 遮罩，z-index 极高保证一定可见 -->
-    <div
-      v-if="adMask"
-      class="ad-mask-absolute-force"
-    >
-      <img
-        class="ad-image-final"
-        src="https://testingcf.jsdelivr.net/gh/macklee6/hahah/ok.gif"
-        alt="广告中"
-        draggable="false"
-      />
-      <div class="ad-text-final">正在跳过广告</div>
-    </div>
-  </div>
+  <div ref="artplayerRef" class="artplayer-container"></div>
 </template>
 
 <script setup>
@@ -33,8 +16,6 @@ const props = defineProps({
 const emit = defineEmits(["timeupdate", "ended", "ready", "error"]);
 
 const artplayerRef = ref(null);
-const adMask = ref(false);
-const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 
 let art = null;
 let hls = null;
@@ -43,6 +24,7 @@ let hasPlayed = false;
 let triedDirect = false;
 let triedProxy = false;
 let playTimeout = null;
+let userPausedByAd = false; // 标记广告暂停的状态
 
 function buildProxyUrl(targetUrl) {
   const proxyBase = import.meta.env.VITE_NETLIFY_PROXY_URL;
@@ -60,6 +42,7 @@ function cleanup() {
     hls.destroy();
     hls = null;
   }
+  userPausedByAd = false;
 }
 
 function onTimeupdate() {
@@ -71,23 +54,27 @@ function onPlaying() {
   clearTimeout(playTimeout);
 }
 
-// 核心：广告倍速+静音+遮罩控制
-function attachAdPlaybackControl(hls, art) {
-  let lastState = null;
+// 广告暂停，正片恢复
+function attachAdPauseControl(hls, art) {
+  let lastWasAd = false;
   hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => {
     const fragUrl = data.frag.url;
     const isAd = isAdFragmentTs(fragUrl);
     if (!art || !art.video) return;
-    if (isAd && lastState !== "ad") {
-      art.video.playbackRate = 4.0;
-      art.video.muted = true;
-      adMask.value = true;
-      lastState = "ad";
-    } else if (!isAd && lastState !== "normal") {
-      art.video.playbackRate = 1.0;
-      art.video.muted = false;
-      adMask.value = false;
-      lastState = "normal";
+
+    if (isAd) {
+      if (!art.video.paused) {
+        art.video.pause();
+        userPausedByAd = true;
+      }
+      lastWasAd = true;
+    } else {
+      // 只有广告期间暂停过，遇到正片才自动恢复
+      if (lastWasAd && userPausedByAd) {
+        art.video.play();
+        userPausedByAd = false;
+      }
+      lastWasAd = false;
     }
   });
 }
@@ -122,7 +109,7 @@ async function initializePlayer(strategy = "proxy") {
           hls.loadSource(src);
           hls.attachMedia(video);
           player.hls = hls;
-          attachAdPlaybackControl(hls, player);
+          attachAdPauseControl(hls, player);
           player.on("destroy", () => hls && hls.destroy());
         } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
           video.src = src;
@@ -203,46 +190,5 @@ onBeforeUnmount(() => cleanup());
   position: relative;
   transition: background 0.2s;
   overflow: hidden;
-}
-.ad-bg {
-  background: #fff !important;
-  transition: background 0.2s;
-}
-.ad-mask-absolute-force {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  pointer-events: none;
-  z-index: 2147483647;
-  background: rgba(255,255,255,0.05);
-}
-.ad-image-final {
-  width: 88px;
-  height: 88px;
-  max-width: 188px;
-  max-height: 188px;
-  border-radius: 50%;
-  margin-bottom: 18px;
-  user-select: none;
-  pointer-events: none;
-  object-fit: contain;
-  box-shadow: 0 0 18px #ffe066bb;
-  background: rgba(255,255,255,0.09);
-}
-.ad-text-final {
-  color: #222;
-  font-size: 23px;
-  font-weight: 700;
-  letter-spacing: 2px;
-  text-shadow: 0 2px 12px #fff9, 0 1px 0 #fff;
-  background: rgba(255,255,255,0.93);
-  border-radius: 12px;
-  padding: 10px 28px 10px 28px;
-  margin-top: 6px;
-  box-shadow: 0 0 2px #fff7;
-  user-select: none;
 }
 </style>
