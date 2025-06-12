@@ -37,12 +37,10 @@
             <option value="ruyi">如意资源</option>
             <option value="heimuer">黑木耳</option>
 	    <option value="hwba">华为吧资源</option>
-            <option value="zuid">最大资源</option>
             <option value="ikun">iKun资源</option>
-            <option value="dyttzy">电影天堂</option>
-            <option value="bfzy">暴风影音</option>
+            <option value="nice">暴风影音</option>
             <option value="tyyszy">天涯</option>
-            <option value="iqiyi">爱奇艺</option>
+            <option value="bigdick">大鸟</option>
             <option value="nb">龙腾虎跃</option>
 	    <template v-if="customSourcesStore.sources.length > 0">
               <option disabled>--- 自定义源 (已保存) ---</option>
