@@ -3,7 +3,7 @@ import Hls from "hls.js";
 const SPECIAL_HOSTS = [
   "kkzycdn.com:65",
   "vod.360zyx.vip",
-  "bfikuncdn.com",
+  "svip.ryplay15.com",
 ];
 
 const AD_KEYWORDS = [
