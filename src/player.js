@@ -13,7 +13,7 @@ const AD_END_RE = /#EXT-X-CUE-IN/i;
 const whitelistStrategies = [
   {
     name: "Date+Hash Fingerprint Strategy",
-    detector: (url) => ['bfikuncdn.com', 'kkzycdn.com', 'ryplay17.com', '360zyx.vip', 'tyyszywvod5.com'].some(domain => url.includes(domain)),
+    detector: (url) => ['bfikuncdn.com', 'kkzycdn.com', 'ryplay17.com', '360zyx.vip'].some(domain => url.includes(domain)),
     createValidator: (manifestText, baseUrl) => {
       const firstFragUrlLine = manifestText.split('\n').find(line => !line.startsWith('#') && line.includes('.ts'));
       if (!firstFragUrlLine) return null;
@@ -49,7 +49,7 @@ const whitelistStrategies = [
   },
   {
     name: "Domain-Specific Sequence Strategy",
-    detector: (url) => ['selfcdn.simaguo.com', 'cdn.wlcdn88.com'].some(domain => url.includes(domain)),
+    detector: (url) => ['selfcdn.simaguo.com', 'cdn.wlcdn88.com', 'tyyszywvod5.com'].some(domain => url.includes(domain)),
     createValidator: () => {
       let lastContentNumber = null;
       console.log(`[白名单] 特定域名序列策略已激活，将严格检查数字连续性。`);
