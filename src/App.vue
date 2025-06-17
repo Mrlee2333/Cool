@@ -40,15 +40,9 @@ main.container {
 }
 
 .cool-footer.glass-footer {
-  // 只保留背景、圆角、毛玻璃等，不加定位
   width: 100vw;
   margin-left: calc(-1 * (100vw - 100%) / 2);
-  background: linear-gradient(
-    120deg,
-    rgba(57, 70, 120, 0.48) 0%,
-    rgba(62, 97, 140, 0.42) 60%,
-    rgba(45, 49, 80, 0.55) 100%
-  );
+  background: var(--my-glass-bg, rgba(30, 35, 45, 0.67));
   background-size: 200% 200%;
   animation: huawei-gradient-move 9s ease-in-out infinite;
   box-shadow: 0 8px 32px 0 rgba(20,40,100,0.18);
