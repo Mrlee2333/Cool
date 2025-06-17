@@ -3,130 +3,73 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from "vue";
-import Artplayer from "artplayer";
-import Hls from "hls.js";
+import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
+import Artplayer from 'artplayer';
+import Hls from 'hls.js';
+import { getHlsConfig } from '../player.js';
+
+// 工具函数：简单判断是否为移动端
+function isMobile() {
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+}
 
 const props = defineProps({
   option: { type: Object, required: true },
   episodeUrl: { type: String, required: true },
-  startTime: { type: Number, default: 0 },
+  startTime: { type: Number, default: 0 }
 });
-const emit = defineEmits(["timeupdate", "ended", "ready", "error"]);
+
+const emit = defineEmits(['timeupdate', 'ended', 'ready', 'error']);
 
 const artplayerRef = ref(null);
-
 let art = null;
-let hls = null;
-let initializeId = 0;
-let hasPlayed = false;
-let triedProxy = false;
-let playTimeout = null;
+let hasSeeked = false;
+let orientationLocking = false;
 
-const WORKER_API = import.meta.env.VITE_OK_PROXY_URL;
-const WORKER_PASSWORD = import.meta.env.VITE_WORKER_API_PASSWORD;
-
-// 云端去广告
-async function getFilteredM3u8(url) {
-  try {
-    const resp = await fetch(WORKER_API, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Password": WORKER_PASSWORD,
-      },
-      body: JSON.stringify({ url }),
-    });
-    if (!resp.ok) throw new Error("Worker API error: " + resp.status);
-    return await resp.text();
-  } catch (e) {
-    console.error("去广告m3u8获取失败", e);
-    return null;
-  }
-}
-
-// 只需倍速/静音辅助片段识别（简单正则）
-function isAdFragmentTs(url = "") {
-  return (
-    /\/(ad|adv|advert|ads)[^/]*\//i.test(url) ||
-    /(\b|_|-)(ad|adv)(\b|_|-)/i.test(url)
-  );
-}
-
-// 倍速广告兜底
-function attachAdPlaybackControl(hls, art) {
-  let lastState = null;
-  hls.on(Hls.Events.FRAG_CHANGED, (_e, data) => {
-    const fragUrl = data.frag.url;
-    const isAd = isAdFragmentTs(fragUrl);
-    if (!art || !art.video) return;
-    if (isAd && lastState !== "ad") {
-      art.video.playbackRate = 6.0;
-      art.video.muted = true;
-      lastState = "ad";
-      art.notice?.show("疑似广告，倍速静音", 1000);
-    } else if (!isAd && lastState !== "normal") {
-      art.video.playbackRate = 1.0;
-      art.video.muted = false;
-      lastState = "normal";
-    }
-  });
-}
-
-function cleanup() {
-  clearTimeout(playTimeout);
+function onTimeupdateNative() {
   if (art) {
-    art.destroy(false);
-    art = null;
+    emit('timeupdate', { time: art.currentTime, duration: art.duration });
   }
-  if (hls) {
-    hls.destroy();
-    hls = null;
-  }
-  hasPlayed = false;
 }
 
-function onTimeupdate() {
-  if (art) emit("timeupdate", { time: art.currentTime, duration: art.duration });
-}
-
-function onPlaying() {
-  hasPlayed = true;
-  clearTimeout(playTimeout);
-}
-
-async function initializePlayer(strategy = "direct") {
-  const id = ++initializeId;
-  cleanup();
-
-  if (!artplayerRef.value) return;
-
-  let playUrl = props.episodeUrl;
-  let adFilterFailed = false;
-
-  // 仅m3u8请求后端去广告
-  if (/\.m3u8(\?|$)/i.test(props.episodeUrl)) {
-    const filteredText = await getFilteredM3u8(props.episodeUrl);
-    if (filteredText) {
-      playUrl = URL.createObjectURL(
-        new Blob([filteredText], { type: "application/vnd.apple.mpegurl" })
-      );
-    } else {
-      adFilterFailed = true;
-      playUrl = props.episodeUrl;
+// 横屏锁定相关
+async function lockOrientationLandscape() {
+  if (orientationLocking) return;
+  orientationLocking = true;
+  try {
+    if (isMobile() && screen.orientation && typeof screen.orientation.lock === 'function') {
+      await screen.orientation.lock('landscape');
     }
-  }
+  } catch (e) { /* ignore */ }
+  orientationLocking = false;
+}
 
-  const hlsConfig = {
-    enableWorker: true,
-    lowLatencyMode: true,
-    backBufferLength: 60,
-  };
+async function unlockOrientation() {
+  if (orientationLocking) return;
+  orientationLocking = true;
+  try {
+    if (isMobile() && screen.orientation && typeof screen.orientation.unlock === 'function') {
+      await screen.orientation.unlock();
+    }
+  } catch (e) { /* ignore */ }
+  orientationLocking = false;
+}
+
+const initializePlayer = () => {
+  if (!artplayerRef.value || !props.episodeUrl) return;
+  if (art) art.destroy(false);
+
+  const defaultTitle = props.option?.title || '';
+  const hlsConfig = getHlsConfig({
+    adFilteringEnabled: true, // 开启广告过滤
+    debugMode: true,          // 开启调试日志，方便观察拦截过程
+  });
 
   const playerOptions = {
     ...props.option,
+    title: defaultTitle,
     container: artplayerRef.value,
-    url: playUrl,
+    url: props.episodeUrl,
     autoMini: false,
     playbackRate: true,
     setting: true,
@@ -134,87 +77,110 @@ async function initializePlayer(strategy = "direct") {
     pip: true,
     fullscreen: true,
     flip: true,
+    
     customType: {
       m3u8(video, src, player) {
         if (Hls.isSupported()) {
-          hls = new Hls(hlsConfig);
+          // 使用带广告拦截的配置来初始化 Hls
+          const hls = new Hls(hlsConfig);
           hls.loadSource(src);
           hls.attachMedia(video);
-          player.hls = hls;
-          attachAdPlaybackControl(hls, player);
-          player.on("destroy", () => hls && hls.destroy());
-          if (adFilterFailed) {
-            player.notice.show("去广告失败，播放原始流", 2000);
-          }
-        } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          player.hls = hls; // 关联实例，Artplayer 会辅助管理
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          // 对于原生支持的设备（如iOS Safari），直接播放
           video.src = src;
-          player.notice.show("原生HLS，可能无法去广告", 2000);
         } else {
-          player.notice.show("浏览器不支持播放此格式");
+          player.notice.show('您的浏览器不支持 HLS 播放');
         }
       },
     },
   };
 
   art = new Artplayer(playerOptions);
+  hasSeeked = false;
 
-  art.on("ready", () => {
-    if (id !== initializeId) return;
-    if (props.startTime > 0) {
+  art.on('fullscreen', (isFull) => {
+    if (isMobile()) {
+      if (isFull) {
+        lockOrientationLandscape();
+      } else {
+        unlockOrientation();
+      }
+    }
+  });
+
+  art.on('ready', () => {
+    if (props.startTime && props.startTime > 0) {
       setTimeout(() => {
-        if (art && Math.abs(art.currentTime - props.startTime) > 1) {
+        if (art && !hasSeeked && Math.abs(art.currentTime - props.startTime) > 1) {
           art.currentTime = props.startTime;
+          hasSeeked = true;
         }
       }, 500);
     }
-    art.video?.addEventListener("timeupdate", onTimeupdate);
-    art.video?.addEventListener("playing", onPlaying);
-    emit("ready", art);
-  });
-
-  art.on("video:ended", () => emit("ended"));
-
-  art.on("error", (err) => {
-    clearTimeout(playTimeout);
-    if (strategy === "direct" && !triedProxy) {
-      triedProxy = true;
-      initializePlayer("proxy");
-    } else if (strategy === "proxy") {
-      emit("error", err || new Error("播放失败：直连和代理都不可用"));
+    emit('ready', art);
+    if (art.video) {
+      art.video.addEventListener('timeupdate', onTimeupdateNative);
     }
   });
 
-  playTimeout = setTimeout(() => {
-    if (hasPlayed) return;
-    if (strategy === "direct" && !triedProxy) {
-      triedProxy = true;
-      initializePlayer("proxy");
-    } else if (strategy === "proxy") {
-      emit("error", new Error("播放超时：直连和代理都不可用"));
+  art.on('destroy', () => {
+    if (art && art.video) {
+      art.video.removeEventListener('timeupdate', onTimeupdateNative);
     }
-  }, strategy === "direct" ? 8000 : 8000);
-}
+  });
 
-watch(() => props.episodeUrl, () => {
-  triedProxy = false;
-  nextTick(() => initializePlayer("direct"));
+  art.on('video:ended', () => emit('ended'));
+  art.on('error', (error) => emit('error', error));
+};
+
+// 切集、切title监听
+watch(
+  () => props.episodeUrl,
+  (newUrl, oldUrl) => {
+    if (newUrl && newUrl !== oldUrl) {
+      if (art && art.url) {
+        art.switchUrl(newUrl).then(() => {
+          if (props.option.title) art.option.title = props.option.title;
+          hasSeeked = false;
+          if (props.startTime && props.startTime > 0) {
+            setTimeout(() => {
+              if (art && !hasSeeked && Math.abs(art.currentTime - props.startTime) > 1) {
+                art.currentTime = props.startTime;
+                hasSeeked = true;
+              }
+            }, 500);
+          }
+        });
+      } else {
+        nextTick(initializePlayer);
+      }
+    }
+  }
+);
+
+watch(
+  () => props.option.title,
+  (newTitle) => {
+    if (art && art.option && art.option.title !== newTitle) {
+      art.option.title = newTitle;
+    }
+  }
+);
+
+onMounted(() => { initializePlayer(); });
+onBeforeUnmount(() => {
+  if (art) {
+    art.destroy(false);
+  }
+  unlockOrientation();
 });
-
-watch(() => props.option.title, (title) => {
-  if (art?.option?.title !== title) art.option.title = title;
-});
-
-onMounted(() => initializePlayer("direct"));
-onBeforeUnmount(() => cleanup());
 </script>
 
 <style scoped>
 .artplayer-container {
   width: 100%;
   height: 500px;
-  background: #000;
-  position: relative;
-  transition: background 0.2s;
-  overflow: hidden;
+  background-color: #000;
 }
 </style>

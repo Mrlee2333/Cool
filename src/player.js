@@ -1,185 +1,193 @@
-import axios from "axios";
+// src/player.js
+import Hls from 'hls.js';
 
-// ========== 路径工具 ==========
-function resolve(from, to) {
-  const resolvedUrl = new URL(to, new URL(from, "resolve://"));
-  if (resolvedUrl.protocol === "resolve:") {
-    const { pathname, search, hash } = resolvedUrl;
-    return pathname + search + hash;
-  }
-  return resolvedUrl.href;
-}
-function urljoin(fromPath, nowPath) {
-  fromPath = fromPath || "";
-  nowPath = nowPath || "";
-  return resolve(fromPath, nowPath);
-}
+// --- 黑名单规则 ---
+const AD_KEYWORDS = ['/ads/', 'advertis', '//ad.', '.com/ad/', '.com/ads/', 'tracking', 'doubleclick.net', 'googleads.g.doubleclick.net', 'googlesyndication.com', 'imasdk.googleapis.com', 'videoad', 'preroll', 'midroll', 'postroll', 'imasdk'];
+const AD_REGEX_RULES = [/^https?:\/\/[^\/]*?adserver\.[^\/]+\//i, /^https?:\/\/[^\/]*?sponsor\.[^\/]+\//i, /\/advertisements\//i];
+const AD_FRAGMENT_URL_RE = /\/(?:ad|ads|adv|preroll|gg)[^\/]*\.ts([?#]|$)/i;
 
-// ========== Hls.js 配置 ==========
-export function getHlsConfig(opt = {}) {
-  return {
-    enableWorker: true,
-    lowLatencyMode: true,
-    backBufferLength: 60,
-    ...opt,
-  };
-}
+// --- HLS标准广告标签规则 ---
+const AD_TRIGGER_RE = /#EXT(?:-X)?-(?:CUE|SCTE35|DATERANGE).*?(?:CLASS="?ad"?|CUE-OUT|SCTE35-OUT|PLACEMENT-OPPORTUNITY|SCTE35-OUT-CONT)/i;
+const AD_END_RE = /#EXT(?:-X)?-(?:CUE|SCTE35|DATERANGE).*?(?:CUE-IN|SCTE35-IN|PLACEMENT-OPPORTUNITY-END)/i;
 
-// ========== m3u8 智能去广告 ==========
-function median(arr) {
-  if (!arr.length) return 0;
-  const sorted = arr.slice().sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0
-    ? (sorted[mid - 1] + sorted[mid]) / 2
-    : sorted[mid];
-}
-
-function parseSlices(lines, m3u8_url) {
-  const slices = [];
-  let tags = [];
-  let extinf = -1;
-  let rawLines = [];
-  lines.forEach((line) => {
-    if (line.startsWith("#EXTINF:")) {
-      extinf = parseFloat(line.match(/^#EXTINF:([\d.]+)/)?.[1] ?? "-1");
-      tags.push(line);
-      rawLines = [line];
-    } else if (line.startsWith("#")) {
-      tags.push(line);
-      rawLines.push(line);
-    } else if (line.trim().length > 0) {
-      slices.push({
-        extinf,
-        url: urljoin(m3u8_url, line.trim()),
-        tags: [...tags],
-        rawLines: [...rawLines, line],
-      });
-      tags = [];
-      extinf = -1;
-      rawLines = [];
+// ========================================================================
+// !! 白名单策略引擎 (已修复) !!
+// ========================================================================
+const whitelistStrategies = [
+  {
+    name: "Date+Hash Fingerprint Strategy",
+    detector: (url) => { const targetDomains = ['kkzycdn.com', 'ryplay17.com', '360zyx.vip']; return targetDomains.some(domain => url.includes(domain)); },
+    createValidator: (manifestText, baseUrl) => {
+      const firstFragUrlLine = manifestText.split('\n').find(line => !line.startsWith('#') && line.includes('.ts'));
+      if (!firstFragUrlLine) return null;
+      const firstFragUrl = new URL(firstFragUrlLine, baseUrl).href;
+      const match = firstFragUrl.match(/\/(\d{8})\/([a-zA-Z0-9_]+)\//);
+      if (!match) return null;
+      const contentSignature = { date: match[1], hash: match[2] };
+      console.log(`[白名单] Date+Hash策略已学习指纹: 日期=${contentSignature.date}, 哈希=${contentSignature.hash}`);
+      return (fragUrl) => {
+        const fragMatch = fragUrl.match(/\/(\d{8})\/([a-zA-Z0-9_]+)\//);
+        if (fragMatch) return fragMatch[1] === contentSignature.date && fragMatch[2] === contentSignature.hash;
+        return false;
+      };
     }
-  });
-  return slices;
-}
+  },
+  {
+    name: "Generic Sequence Strategy",
+    detector: () => true, // 默认备用策略
+    // !! 核心修复：重写此处的 `createValidator`，不再使用内部API !!
+    createValidator: (manifestText, baseUrl) => {
+        // 通过轻量级文本解析获取所有ts文件行
+        const tsUrlLines = manifestText.split('\n').filter(line => !line.startsWith('#') && line.includes('.ts'));
+        
+        if (tsUrlLines.length < 3) return null; // 切片不足，无法学习
 
-function detectAdSlices(slices, durationMedian) {
-  const adSlices = new Set();
-  let inAdRange = false;
-  slices.forEach((slice) => {
-    // tag 判断广告区间
-    if (
-      slice.tags.some((tag) =>
-        /EXT-X-DATERANGE.*CLASS="?ad"?/i.test(tag) ||
-        /SCTE35-OUT/i.test(tag) ||
-        /EXT-AD-START/i.test(tag)
-      )
-    ) {
-      inAdRange = true;
-    }
-    if (
-      slice.tags.some((tag) =>
-        /SCTE35-IN/i.test(tag) ||
-        /EXT-AD-END/i.test(tag)
-      )
-    ) {
-      inAdRange = false;
-    }
-    // 时长判断
-    if (slice.extinf > 0 && durationMedian > 0 && slice.extinf < durationMedian * 0.55) {
-      adSlices.add(slice.url);
-    }
-    // 命名判断
-    if (
-      /\/(ad|adv|advert|ads)[^/]*\//i.test(slice.url) ||
-      /(\b|_|-)(ad|adv)(\b|_|-)/i.test(slice.url)
-    ) {
-      adSlices.add(slice.url);
-    }
-    // tag区间视为广告
-    if (inAdRange) {
-      adSlices.add(slice.url);
-    }
-  });
-  return adSlices;
-}
+        const getCommonPrefix = (s1, s2) => { let i = 0; while(i < s1.length && i < s2.length && s1[i] === s2[i]){ i++; } return s1.substring(0, i); };
+        
+        // 解析前三个URL
+        const url1 = new URL(tsUrlLines[0], baseUrl).href;
+        const url2 = new URL(tsUrlLines[1], baseUrl).href;
+        const url3 = new URL(tsUrlLines[2], baseUrl).href;
+        
+        // 计算公共前缀
+        const prefix12 = getCommonPrefix(url1, url2);
+        const finalPrefix = getCommonPrefix(prefix12, url3);
+        const lastSlashIndex = finalPrefix.lastIndexOf('/');
+        
+        if (lastSlashIndex <= "https://".length) return null; // 学习到的前缀无意义
 
-// 主函数
-export async function fixAdM3u8Ai(m3u8_url, headers = null, depth = 0) {
-  if (depth > 3) {
-    console.warn("[fixAdM3u8Ai] 嵌套m3u8层级过深，终止处理", m3u8_url);
-    return "";
-  }
-  let m3u8;
-  try {
-    const option = headers ? { headers } : {};
-    console.log("[fixAdM3u8Ai] 拉取 m3u8:", m3u8_url);
-    const res = await axios.get(m3u8_url, option);
-    m3u8 = res.data;
-  } catch (e) {
-    console.error("[fixAdM3u8Ai] 拉取m3u8失败", m3u8_url, e);
-    return "";
-  }
-  const lines = m3u8
-    .replace(/\r/g, "")
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
-
-  // 检查是否嵌套m3u8，递归处理
-  const m3u8Lines = lines.filter((l) => !l.startsWith("#"));
-  const lastUrl = m3u8Lines.slice(-1)[0] || "";
-  if (
-    depth < 3 &&
-    lastUrl &&
-    /\.m3u8(\?|$)/i.test(lastUrl) &&
-    lastUrl !== m3u8_url
-  ) {
-    const abs = urljoin(m3u8_url, lastUrl);
-    console.log("[fixAdM3u8Ai] 检测到嵌套 m3u8，递归处理：", abs);
-    return await fixAdM3u8Ai(abs, headers, depth + 1);
-  }
-
-  // 解析所有切片
-  const slices = parseSlices(lines, m3u8_url);
-  const durations = slices.map((s) => s.extinf).filter((d) => d > 0);
-  const durationMedian = median(durations);
-  console.log(`[fixAdM3u8Ai] 片段总数: ${slices.length}, 正片片段中位时长: ${durationMedian}`);
-
-  // 找广告
-  const adSliceUrls = detectAdSlices(slices, durationMedian);
-  if (adSliceUrls.size === 0) {
-    console.warn("[fixAdM3u8Ai] 没检测到广告切片！");
-  } else {
-    console.log("[fixAdM3u8Ai] 检测到广告切片数:", adSliceUrls.size);
-    console.log("[fixAdM3u8Ai] 广告切片列表:", [...adSliceUrls].slice(0, 10), adSliceUrls.size > 10 ? "...(more)" : "");
-  }
-
-  // 拼接m3u8
-  let outputLines = [];
-  let lastWasAd = false;
-  let adCount = 0;
-  for (let i = 0; i < slices.length; i++) {
-    if (adSliceUrls.has(slices[i].url)) {
-      lastWasAd = true;
-      adCount++;
-      continue;
-    } else {
-      if (lastWasAd) {
-        outputLines.push("#EXT-X-DISCONTINUITY");
-      }
-      lastWasAd = false;
-      outputLines = outputLines.concat(slices[i].rawLines);
+        const commonPrefix = finalPrefix.substring(0, lastSlashIndex + 1);
+        console.log(`[白名单] 数字序列策略已学习URL前缀: ${commonPrefix}`);
+        
+        let lastContentNumber = null;
+        
+        // 返回最终的检查函数
+        return (fragUrl) => {
+            if (!fragUrl.startsWith(commonPrefix)) return false; // 首先检查前缀
+            
+            const extractNumber = (url) => { const m = url.match(/(?:[a-zA-Z\-_]*)(\d+)\.ts/); return m ? parseInt(m[1], 10) : null; };
+            const currentNumber = extractNumber(fragUrl);
+            
+            if (currentNumber !== null) {
+                // 如果上一个正片的编号存在，且当前编号不连续，则判定为非正片
+                if (lastContentNumber !== null && currentNumber !== lastContentNumber + 1) return false;
+                // 这是一个连续的正片，更新编号
+                lastContentNumber = currentNumber;
+            }
+            // 如果没有编号或者序列连续，则认为是正片
+            return true;
+        };
     }
   }
-  // 保留m3u8首部非切片配置
-  const head = lines.filter((l) => l.startsWith("#") && !l.startsWith("#EXTINF"));
-  const result = head.concat(outputLines).join("\n");
-  console.log(`[fixAdM3u8Ai] 去广告完成：原始${slices.length}片段，去广告后${outputLines.length}片段，移除${adCount}片段`);
-  return result;
+];
+
+/**
+ * AdAwareLoader - 一个能感知并过滤广告的 HLS 加载器
+ */
+class AdAwareLoader extends Hls.DefaultConfig.loader {
+    constructor(config) {
+        super(config);
+        const customConfig = config.p2pConfig || {};
+        this.adFilteringEnabled = customConfig.adFilteringEnabled !== false;
+        this.debugMode = customConfig.debugMode === true;
+        this.logPrefix = '[AdBlocker]';
+        if (this.debugMode) console.log(`${this.logPrefix} Initialized. Ad filtering is ${this.adFilteringEnabled ? 'ENABLED' : 'DISABLED'}.`);
+    }
+
+    _stripManifest(manifestText, baseUrl) {
+        if (!this.adFilteringEnabled) return manifestText;
+
+        const activeWhitelistStrategy = whitelistStrategies.find(s => s.detector(baseUrl));
+        const checkIsContent = activeWhitelistStrategy ? activeWhitelistStrategy.createValidator(manifestText, baseUrl) : null;
+        if (activeWhitelistStrategy && !checkIsContent) {
+            if(this.debugMode) console.warn(`${this.logPrefix} Strategy "${activeWhitelistStrategy.name}" failed to learn pattern.`);
+        }
+
+        let inAdBreakByTag = false;
+        const lines = manifestText.split(/\r?\n/);
+        const filteredLines = [];
+        let adCount = 0;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmedLine = line.trim();
+            if (!trimmedLine) continue;
+
+            if (AD_TRIGGER_RE.test(trimmedLine)) { inAdBreakByTag = true; continue; }
+            if (inAdBreakByTag && AD_END_RE.test(trimmedLine)) { inAdBreakByTag = false; continue; }
+            if (inAdBreakByTag) { adCount++; continue; }
+
+            if (!trimmedLine.startsWith("#")) {
+                const fragUrl = new URL(trimmedLine, baseUrl).href;
+                let isAd = false;
+                
+                if (isAdUniversalAd(fragUrl)) { // 新增的isAdUniversalAd辅助函数
+                    isAd = true;
+                } else if (checkIsContent) {
+                    if (!checkIsContent(fragUrl)) isAd = true;
+                }
+
+                if (isAd) {
+                    adCount++;
+                    if (filteredLines.length > 0 && filteredLines[filteredLines.length - 1].startsWith("#EXTINF:")) {
+                        filteredLines.pop();
+                    }
+                    continue;
+                }
+            }
+            
+            filteredLines.push(line);
+        }
+        
+        if (this.debugMode) console.log(`${this.logPrefix} Filtering complete. Removed ${adCount} ad fragments.`);
+        return filteredLines.join("\n");
+    }
+
+    load(context, config, callbacks) {
+        const { type, url } = context;
+
+        if (this.adFilteringEnabled && (type === "manifest" || type === "level")) {
+            const originalOnSuccess = callbacks.onSuccess;
+            callbacks.onSuccess = (response, stats, context) => {
+                if (typeof response.data === "string") {
+                    response.data = this._stripManifest(response.data, context.url);
+                }
+                originalOnSuccess(response, stats, context);
+};
+        }
+        else if (this.adFilteringEnabled && type === "fragment" && AD_FRAGMENT_URL_RE.test(url)) {
+            if (this.debugMode) console.warn(`${this.logPrefix} Blocking ad fragment by URI: ${url}`);
+            callbacks.onError({ code: Hls.ErrorCodes.NETWORK_ERROR, text: "Ad fragment blocked by client" }, context, null);
+            return;
+        }
+        
+        super.load(context, config, callbacks);
+    }
 }
 
-// ========== 判断ts片段是否为广告 ==========
-export function isAdFragmentTs(url) {
-  return /\/(ad|adv|advert|ads)[^/]*\//i.test(url) || /(\b|_|-)(ad|adv)(\b|_|-)/i.test(url);
+// 辅助函数，将黑名单检查逻辑提取出来
+function isAdUniversalAd(url) {
+    const lowerUrl = url.toLowerCase();
+    for (const keyword of AD_KEYWORDS) { if (lowerUrl.includes(keyword)) return true; }
+    for (const regex of AD_REGEX_RULES) { if (regex.test(url)) return true; }
+    return false;
+}
+
+
+/**
+ * 导出一个函数，用于生成 HLS 的自定义配置。
+ */
+export function getHlsConfig(options = {}) {
+    return {
+        p2pConfig: {
+            adFilteringEnabled: options.adFilteringEnabled !== false,
+            debugMode: options.debugMode === true,
+        },
+        loader: AdAwareLoader,
+        // 其他 HLS 优化配置
+        maxBufferLength: 60,
+        maxBufferSize: 100 * 1000 * 1000,
+        fragLoadingMaxRetry: 4,
+        manifestLoadingMaxRetry: 2,
+    };
 }

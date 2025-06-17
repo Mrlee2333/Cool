@@ -68,24 +68,24 @@
     <!-- 规则输入区 -->
     <div class="spider-card box mb-5">
       <div class="field mb-2">
-        <label>列表(list) XPath</label>
+        <label>列表(list)</label>
         <input class="input spider-input" v-model="rules.list" placeholder="//ul[@id='list']/li" />
       </div>
       <div class="field mb-2">
-        <label>标题(title) XPath (相对list)</label>
+        <label>标题(title)</label>
         <input class="input spider-input" v-model="rules.title" placeholder="./a/text()" />
       </div>
       <div class="field mb-2">
-        <label>封面(cover) XPath (相对list)</label>
+        <label>封面(cover)</label>
         <input class="input spider-input" v-model="rules.cover" placeholder="./img/@src" />
       </div>
       <div class="field mb-2">
-        <label>详情地址(detailUrl) XPath (相对list)</label>
+        <label>详情地址(detailUrl)</label>
         <input class="input spider-input" v-model="rules.detailUrl" placeholder="./a/@href" />
       </div>
       <div class="field mb-2">
-        <label>下一页(nextUrl) XPath</label>
-        <input class="input spider-input" v-model="rules.nextUrl" placeholder="//a[@class='next']/@href" />
+        <label>下一页(nextUrl)</label>
+	<input class="input spider-input" v-model="rules.nextUrl" placeholder="https://test.com/ok/?page=${num}" />
       </div>
       <div class="field mt-4">
         <label>目标页面URL</label>

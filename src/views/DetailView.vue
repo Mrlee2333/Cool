@@ -36,7 +36,7 @@
 
           <div class="content video-description p-3 mb-4 has-text-grey-lighter">
             <h3 class="title is-5 has-text-primary mb-2">剧情简介</h3>
-            <p v-text="videoInfo.desc || '暂无剧情简介。'"></p>
+            <p>{{ cleanDescription }}</p>
           </div>
 
           <div class="detail-meta-grid mb-4">
@@ -314,6 +314,31 @@ watch(currentSourceIndex, async (newIdx, oldIdx) => {
     await fetchEpisodesForSource(newIdx);
     showAllEpisodes.value = false; // 切换源时自动收起
   }
+});
+
+const cleanDescription = computed(() => {
+  if (videoInfo.value?.desc) {
+    let text = videoInfo.value.desc;
+
+    try {
+      // 步骤一：使用 DOMParser 解码 HTML 实体
+      // 这是处理此类问题的标准、安全做法
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(text, 'text/html');
+      // 解码后的文本位于 body 的 textContent 中
+      text = doc.body.textContent || "";
+    } catch (e) {
+      // 如果解析出错（极少情况），执行一个简单的后备方案
+      console.error("DOMParser解码HTML实体时出错:", e);
+      text = text.replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+    }
+    
+    // 步骤二：移除解码后产生的HTML标签 (如果存在的话)
+    // 这一步确保即使解码后的文本依然包含<p>等标签，也能被彻底清除
+    return text.replace(/<[^>]*>/g, '').trim();
+  }
+  
+  return '暂无剧情简介。';
 });
 </script>
 

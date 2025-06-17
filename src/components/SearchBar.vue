@@ -42,6 +42,7 @@
             <option value="tyyszy">天涯</option>
             <option value="bigdick">大鸟</option>
             <option value="nb">龙腾虎跃</option>
+	    <option value="ok">360</option>
 	    <template v-if="customSourcesStore.sources.length > 0">
               <option disabled>--- 自定义源 (已保存) ---</option>
               <option
