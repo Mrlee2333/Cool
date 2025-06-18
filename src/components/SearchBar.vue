@@ -38,7 +38,7 @@
             <option value="heimuer">黑木耳</option>
 	    <option value="hwba">华为吧资源</option>
             <option value="ikun">iKun资源</option>
-            <option value="nice">暴风影音</option>
+            <option value="nice">豆瓣</option>
             <option value="tyyszy">天涯</option>
             <option value="bigdick">大鸟</option>
             <option value="nb">龙腾虎跃</option>
