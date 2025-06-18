@@ -1,19 +1,21 @@
+// src/player.js
 import Hls from 'hls.js';
 
-// --- 黑名单规则 ---
+// --- 黑名单与HLS标签规则 ---
 const AD_KEYWORDS = ['/ads/', 'advertis', '//ad.', '.com/ad/', '.com/ads/', 'tracking', 'doubleclick.net'];
 const AD_REGEX_RULES = [/^https?:\/\/[^\/]*?adserver\.[^\/]+\//i, /\/advertisements\//i];
 const BLOCKED_EXTENSIONS_RE = /\.(vtt)$/i;
-
-// --- HLS标准广告标签规则 ---
 const AD_TRIGGER_RE = /#EXT-X-CUE-OUT/i;
 const AD_END_RE = /#EXT-X-CUE-IN/i;
 
-// --- 白名单策略引擎 ---
+// ========================================================================
+// !! 白名单策略引擎 !!
+// ========================================================================
 const whitelistStrategies = [
+  // 策略一：Date+Hash 指纹策略
   {
     name: "Date+Hash Fingerprint Strategy",
-    detector: (url) => ['bfikuncdn.com', 'kkzycdn.com', 'ryplay17.com', '360zyx.vip'].some(domain => url.includes(domain)),
+    detector: (url) => ['kkzycdn.com', 'ryplay17.com', '360zyx.vip'].some(domain => url.includes(domain)),
     createValidator: (manifestText, baseUrl) => {
       const firstFragUrlLine = manifestText.split('\n').find(line => !line.startsWith('#') && line.includes('.ts'));
       if (!firstFragUrlLine) return null;
@@ -29,6 +31,7 @@ const whitelistStrategies = [
       };
     }
   },
+  // 策略二：JPEG 日期指纹策略
   {
     name: "JPEG Date Fingerprint Strategy",
     detector: (url) => url.includes('play.ly166.com'),
@@ -47,34 +50,54 @@ const whitelistStrategies = [
       };
     }
   },
+  // [核心修改] 策略三：特定域名数字序列策略 (逻辑重构)
   {
     name: "Domain-Specific Sequence Strategy",
-    detector: (url) => ['selfcdn.simaguo.com', 'cdn.wlcdn88.com', 'tyyszywvod5.com'].some(domain => url.includes(domain)),
-    createValidator: () => {
+    detector: (url) => ['selfcdn.simaguo.com', 'cdn.wlcdn88.com'].some(domain => url.includes(domain)),
+    createValidator: (manifestText, baseUrl) => {
       let lastContentNumber = null;
-      console.log(`[白名单] 特定域名序列策略已激活，将严格检查数字连续性。`);
+      const logPrefix = '[白名单-序列策略]';
+      console.log(`${logPrefix} 已激活，将严格检查数字连续性。`);
+      
+      const extractNumber = (url) => {
+        const m = url.match(/(?:[a-zA-Z\-_]*)(\d+)\.(ts|jpeg|jpg)/i);
+        return m ? parseInt(m[1], 10) : null;
+      };
+
+      // 返回最终的检查函数 (check function)
       return (fragUrl) => {
-        const extractNumber = (url) => { const m = url.match(/(?:[a-zA-Z\-_]*)(\d+)\.(?:ts|jpeg|jpg)/i); return m ? parseInt(m[1], 10) : null; };
         const currentNumber = extractNumber(fragUrl);
-        if (currentNumber === null) return false;
-        if (lastContentNumber === null) { lastContentNumber = currentNumber; return true; }
-        if (currentNumber === lastContentNumber + 1) { lastContentNumber = currentNumber; return true; }
-        console.log(`[白名单] 数字序列策略命中: 序列中断 (期望: ${lastContentNumber + 1}, 得到: ${currentNumber})`);
+
+        // case 1: 当前URL没有可识别的序列号
+        if (currentNumber === null) {
+          console.log(`${logPrefix} 判断为广告 (原因: URL中无序列号) -> ${fragUrl}`);
+          return false; // 在此策略下，没有编号的片段被视为非正片
+        }
+
+        // case 2: 这是我们看到的第一个带编号的片段
+        if (lastContentNumber === null) {
+          console.log(`${logPrefix} 学习到序列起点: ${currentNumber}`);
+          lastContentNumber = currentNumber;
+          return true; // 认定为正片序列起点
+        }
+        
+        // case 3: 检查序列是否连续
+        if (currentNumber === lastContentNumber + 1) {
+          lastContentNumber = currentNumber; // 更新序列
+          return true; // 是连续的正片
+        }
+        
+        // case 4: 序列中断
+        console.log(`${logPrefix} 判断为广告 (原因: 序列中断，期望 ${lastContentNumber + 1}，得到 ${currentNumber}) -> ${fragUrl}`);
         return false;
       };
     }
   }
 ];
 
-class AdAwareLoader extends Hls.DefaultConfig.loader {
-    constructor(config) {
-        super(config);
-        const customConfig = config.p2pConfig || {};
-        this.adFilteringEnabled = customConfig.adFilteringEnabled !== false;
-        this.debugMode = customConfig.debugMode === true;
-        this.logPrefix = '[AdBlocker]';
-    }
 
+class AdAwareLoader extends Hls.DefaultConfig.loader {
+    constructor(config) { super(config); const customConfig = config.p2pConfig || {}; this.adFilteringEnabled = customConfig.adFilteringEnabled !== false; this.debugMode = customConfig.debugMode === true; this.logPrefix = '[AdBlocker]'; }
     _stripManifest(manifestText, baseUrl) {
         if (!this.adFilteringEnabled) return manifestText;
         const activeWhitelistStrategy = whitelistStrategies.find(s => s.detector(baseUrl));
@@ -98,7 +121,7 @@ class AdAwareLoader extends Hls.DefaultConfig.loader {
                 const fragUrl = new URL(trimmedLine, baseUrl).href;
                 let isAd = false;
                 if (isUniversalAd(fragUrl, this.debugMode)) { isAd = true; }
-                else if (checkIsContent && !checkIsContent(fragUrl)) { if(this.debugMode) console.log(`[白名单] 命中: '${activeWhitelistStrategy.name}'验证失败 -> ${fragUrl}`); isAd = true; }
+                else if (checkIsContent && !checkIsContent(fragUrl)) { if(this.debugMode) console.log(`[广告检测] : 白名单规则'${activeWhitelistStrategy.name}'已删除广告 -> ${fragUrl}`); isAd = true; }
                 if (isAd) {
                     adCount++;
                     if (filteredLines.length > 0 && filteredLines[filteredLines.length - 1].startsWith("#EXTINF:")) {
@@ -112,7 +135,6 @@ class AdAwareLoader extends Hls.DefaultConfig.loader {
         if (this.debugMode && adCount > 0) console.log(`${this.logPrefix} Filtering complete. Removed ${adCount} ad fragments.`);
         return filteredLines.join("\n");
     }
-
     load(context, config, callbacks) {
         const { type } = context;
         if (this.adFilteringEnabled && (type === "manifest" || type === "level")) {
@@ -127,15 +149,7 @@ class AdAwareLoader extends Hls.DefaultConfig.loader {
         super.load(context, config, callbacks);
     }
 }
-
-function isUniversalAd(url, debugMode) {
-    const lowerUrl = url.toLowerCase();
-    if (BLOCKED_EXTENSIONS_RE.test(lowerUrl)) { if (debugMode) console.log(`[黑名单] 命中: 非法文件扩展名 -> ${url}`); return true; }
-    for (const keyword of AD_KEYWORDS) { if (lowerUrl.includes(keyword)) { if (debugMode) console.log(`[黑名单] 命中: 关键字 '${keyword}' -> ${url}`); return true; } }
-    for (const regex of AD_REGEX_RULES) { if (regex.test(url)) { if (debugMode) console.log(`[黑名单] 命中: 正则 '${regex.source}' -> ${url}`); return true; } }
-    return false;
-}
-
+function isUniversalAd(url, debugMode) { const lowerUrl = url.toLowerCase(); if (BLOCKED_EXTENSIONS_RE.test(lowerUrl)) { if (debugMode) console.log(`[黑名单] 命中: 非法文件扩展名 -> ${url}`); return true; } for (const keyword of AD_KEYWORDS) { if (lowerUrl.includes(keyword)) { if (debugMode) console.log(`[黑名单] 命中: 关键字 '${keyword}' -> ${url}`); return true; } } for (const regex of AD_REGEX_RULES) { if (regex.test(url)) { if (debugMode) console.log(`[黑名单] 命中: 正则 '${regex.source}' -> ${url}`); return true; } } return false; }
 export function getHlsConfig(options = {}) {
     return {
         p2pConfig: {
@@ -148,4 +162,4 @@ export function getHlsConfig(options = {}) {
         fragLoadingMaxRetry: 4,
         manifestLoadingMaxRetry: 2,
     };
-}
+  }
