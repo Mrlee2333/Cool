@@ -35,7 +35,7 @@
             <option value="aggregated">聚合搜索</option>
             <option disabled>--- 配置源 ---</option>
             <option value="ruyi">如意资源</option>
-            <option value="heimuer">黑木耳</option>
+            <option value="heimuer">最大资源</option>
 	    <option value="hwba">华为吧资源</option>
             <option value="ikun">iKun资源</option>
             <option value="nice">豆瓣</option>
