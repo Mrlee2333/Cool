@@ -15,7 +15,7 @@ const whitelistStrategies = [
   // 策略一：Date+Hash 指纹策略
   {
     name: "Date+Hash Fingerprint Strategy",
-    detector: (url) => ['kkzycdn.com', 'ryplay17.com', '360zyx.vip'].some(domain => url.includes(domain)),
+    detector: (url) => ['bfikuncdn.com', 'kkzycdn.com', 'ryplay17.com', '360zyx.vip'].some(domain => url.includes(domain)),
     createValidator: (manifestText, baseUrl) => {
       const firstFragUrlLine = manifestText.split('\n').find(line => !line.startsWith('#') && line.includes('.ts'));
       if (!firstFragUrlLine) return null;
@@ -53,7 +53,7 @@ const whitelistStrategies = [
   // [核心修改] 策略三：特定域名数字序列策略 (逻辑重构)
   {
     name: "Domain-Specific Sequence Strategy",
-    detector: (url) => ['selfcdn.simaguo.com', 'cdn.wlcdn88.com'].some(domain => url.includes(domain)),
+    detector: (url) => ['m3u.nikanba.live', 'selfcdn.simaguo.com', 'cdn.wlcdn88.com'].some(domain => url.includes(domain)),
     createValidator: (manifestText, baseUrl) => {
       let lastContentNumber = null;
       const logPrefix = '[白名单-序列策略]';
