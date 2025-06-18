@@ -14,7 +14,7 @@ const V_DAAYEE_ADEFGI_RE = /v\d+\.(daayee\.com|adefgi\.top)/i;
 const VODCND_MYRQSB_RE = /vodcnd\d+\.myrqsb\.com/i;
 
 // ========================================================================
-// !! 白名单策略引擎 (已精炼为三个策略) !!
+// 开心超人引擎
 // ========================================================================
 const whitelistStrategies = [
   // [修改] 策略一：升级为统一的 Date+Hash 指纹策略
@@ -39,7 +39,7 @@ const whitelistStrategies = [
       const match = firstFragUrl.match(/\/(\d{8})\/([a-zA-Z0-9_]+)\//);
       if (!match) return null;
       const contentSignature = { date: match[1], hash: match[2] };
-      console.log(`[白名单] Unified Date+Hash策略已学习指纹: 日期=${contentSignature.date}, 哈希=${contentSignature.hash}`);
+      console.log(`开心超人已发现大大怪: 日期=${contentSignature.date}, 地址=${contentSignature.hash}`);
       return (fragUrl) => {
         const fragMatch = fragUrl.match(/\/(\d{8})\/([a-zA-Z0-9_]+)\//);
         if (fragMatch) return fragMatch[1] === contentSignature.date && fragMatch[2] === contentSignature.hash;
@@ -58,7 +58,7 @@ const whitelistStrategies = [
       const match = firstFragUrl.match(/\/(\d{8})\//);
       if (!match) return null;
       const contentDate = match[1];
-      console.log(`[白名单] JPEG日期策略已学习指纹: 日期=${contentDate}`);
+      console.log(`开心超人发现小小怪：日期=${contentDate}`);
       return (fragUrl) => {
         if (!/\.jpe?g$/i.test(fragUrl)) return true;
         const fragMatch = fragUrl.match(/\/(\d{8})\//);
@@ -72,14 +72,14 @@ const whitelistStrategies = [
     detector: (url) => ['m3u.nikanba.live', 'selfcdn.simaguo.com', 'cdn.wlcdn88.com'].some(domain => url.includes(domain)),
     createValidator: () => {
       let lastContentNumber = null;
-      console.log(`[白名单] 特定域名序列策略已激活`);
+      console.log(`开心超人已启动！`);
       return (fragUrl) => {
         const extractNumber = (url) => { const m = url.match(/(?:[a-zA-Z\-_]*)(\d+)\.(?:ts|jpeg|jpg)/i); return m ? parseInt(m[1], 10) : null; };
         const currentNumber = extractNumber(fragUrl);
         if (currentNumber === null) return false;
         if (lastContentNumber === null) { lastContentNumber = currentNumber; return true; }
         if (currentNumber === lastContentNumber + 1) { lastContentNumber = currentNumber; return true; }
-        console.log(`[白名单] 数字序列策略命中: 序列中断 (期望: ${lastContentNumber + 1}, 得到: ${currentNumber})`);
+        console.log(`开心超人发现怪兽数量 : ${lastContentNumber + 1}, 已找到: ${currentNumber})`);
         return false;
       };
     }
@@ -94,8 +94,8 @@ class AdAwareLoader extends Hls.DefaultConfig.loader {
         const activeWhitelistStrategy = whitelistStrategies.find(s => s.detector(baseUrl));
         const checkIsContent = activeWhitelistStrategy ? activeWhitelistStrategy.createValidator(manifestText, baseUrl, this.debugMode) : null;
         if (this.debugMode) {
-            if (activeWhitelistStrategy) { console.log(`[策略引擎] 已激活白名单策略: ${activeWhitelistStrategy.name}`); }
-            else { console.log(`[策略引擎] 未激活任何特定白名单策略，将仅使用通用黑名单。`); }
+            if (activeWhitelistStrategy) { console.log(`开心超人已启动: ${activeWhitelistStrategy.name}`); }
+            else { console.log(`开心超人在度假`); }
         }
         let inAdBreakByTag = false;
         const lines = manifestText.split(/\r?\n/);
@@ -112,7 +112,7 @@ class AdAwareLoader extends Hls.DefaultConfig.loader {
                 const fragUrl = new URL(trimmedLine, baseUrl).href;
                 let isAd = false;
                 if (isUniversalAd(fragUrl, this.debugMode)) { isAd = true; }
-                else if (checkIsContent && !checkIsContent(fragUrl)) { if(this.debugMode) console.log(`[白名单] 命中: '${activeWhitelistStrategy.name}'验证失败 -> ${fragUrl}`); isAd = true; }
+                else if (checkIsContent && !checkIsContent(fragUrl)) { if(this.debugMode) console.log(`开心超人发现大大怪: '${activeWhitelistStrategy.name}'打倒大大怪 ${fragUrl}`); isAd = true; }
                 if (isAd) {
                     adCount++;
                     if (filteredLines.length > 0 && filteredLines[filteredLines.length - 1].startsWith("#EXTINF:")) {
@@ -140,7 +140,7 @@ class AdAwareLoader extends Hls.DefaultConfig.loader {
         super.load(context, config, callbacks);
     }
 }
-function isUniversalAd(url, debugMode) { const lowerUrl = url.toLowerCase(); if (BLOCKED_EXTENSIONS_RE.test(lowerUrl)) { if (debugMode) console.log(`[黑名单] 命中: 非法文件扩展名 -> ${url}`); return true; } for (const keyword of AD_KEYWORDS) { if (lowerUrl.includes(keyword)) { if (debugMode) console.log(`[黑名单] 命中: 关键字 '${keyword}' -> ${url}`); return true; } } for (const regex of AD_REGEX_RULES) { if (regex.test(url)) { if (debugMode) console.log(`[黑名单] 命中: 正则 '${regex.source}' -> ${url}`); return true; } } return false; }
+function isUniversalAd(url, debugMode) { const lowerUrl = url.toLowerCase(); if (BLOCKED_EXTENSIONS_RE.test(lowerUrl)) { if (debugMode) console.log(`开心超人发现: 非法文件扩展名 -> ${url}`); return true; } for (const keyword of AD_KEYWORDS) { if (lowerUrl.includes(keyword)) { if (debugMode) console.log(`开心超人发现: 关键字 '${keyword}' -> ${url}`); return true; } } for (const regex of AD_REGEX_RULES) { if (regex.test(url)) { if (debugMode) console.log(`开心超人发现: 正则 '${regex.source}' -> ${url}`); return true; } } return false; }
 export function getHlsConfig(options = {}) {
     return {
         p2pConfig: {
