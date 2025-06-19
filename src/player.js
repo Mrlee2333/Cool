@@ -22,7 +22,7 @@ const whitelistStrategies = [
     name: "Unified Date+Hash Fingerprint Strategy",
     detector: (url) => {
       // 检查固定域名列表
-      const fixedDomains = ['tyyszywvod5.com', 'kkzycdn.com', 'ryplay17.com', '360zyx.vip', 'bfikuncdn.com'];
+      const fixedDomains = ['tyyszywvod5.com', 'kkzycdn.com', 'ryplay17.com', '360zyx.vip', 'bfikuncdn.com', 'vod.guoluche.com'];
       if (fixedDomains.some(domain => url.includes(domain))) return true;
 
       // 检查通配符域名正则列表
